@@ -338,10 +338,18 @@ it with [`kimi.Parser`](../../../backend/internal/integration/agents/kimi/parser
 
 Kimi's OpenAI-chat-shaped JSONL maps assistant content and tool calls, tool
 results, and the final `role=meta,type=session.resume_hint` record. That final
-record supplies a changed session ID and is also Kimi's de-facto
-`run.completed`; the CLI does not provide a separate completion, reasoning, or
-usage line. Because Kimi has no native fork primitive, `Run` clears `ResumeID`
-when `Fork` is true.
+record supplies a changed session ID and a pending completion. `Run` publishes
+`run.completed` only after a successful process exit; missing completion records
+are treated as incomplete responses. The CLI does not provide a separate
+completion, reasoning, or usage line. The adapter clears `ResumeID` when `Fork`
+is true, so forked chats start fresh.
+
+Kimi failures retain bounded stderr diagnostics in a single `run.failed` event.
+An exact missing-session error before any assistant/tool output returns
+`ErrSessionNotFound`, allowing the prompt service to recover with visible
+history. Other failures are not replayed. Cancellation emits no completion.
+See the [Kimi runtime review](kimi-runtime-review.md) for the CLI checks and
+remaining limitations.
 
 ### Antigravity
 

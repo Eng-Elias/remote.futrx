@@ -14,12 +14,9 @@ import (
 const containerKimiHome = "/root/.kimi-code"
 
 func (p *Provider) args(req agent.RunRequest) []string {
-	// kimi-code takes the prompt as a positional argument (NOT stdin). Print
+	// kimi-code takes the prompt as the -p option's value (not stdin). Print
 	// mode (`-p`) supplies the provider's normal non-interactive behavior.
 	args := []string{"-p", req.Prompt, "--output-format", "stream-json"}
-	if req.Mode == agent.RunModePlan {
-		args = append(args, "--plan")
-	}
 	if model := normalizeKimiModel(req.Model); model != "" {
 		args = append(args, "--model", model)
 	}

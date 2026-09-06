@@ -2,12 +2,12 @@ package runtime
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/futrx-com/remote.futrx.com/internal/agent"
@@ -76,13 +76,16 @@ func RunProcess(
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		sc.Buffer(make([]byte, 0, 8192), maxBytes(opts.StderrMaxLineBytes, 1<<20))
-		var captured strings.Builder
+		var captured bytes.Buffer
 		for sc.Scan() {
 			line := sc.Text()
 			log.Printf("%s[%s] stderr: %s", name, logID, line)
-			if captured.Len() < 64<<10 {
-				captured.WriteString(line)
-				captured.WriteByte('\n')
+			captured.WriteString(line)
+			captured.WriteByte('\n')
+			// Errors often follow a long stream of tool progress. Retain the
+			// bounded tail so the final diagnostic survives noisy runs.
+			if excess := captured.Len() - (64 << 10); excess > 0 {
+				captured.Next(excess)
 			}
 		}
 		stderrDone <- captured.String()

@@ -12,7 +12,7 @@ import (
 
 type rawObject map[string]json.RawMessage
 
-func parseProviderCatalog(raw []byte, help, defaults string) (agent.Capabilities, error) {
+func parseProviderCatalog(raw []byte, defaults string) (agent.Capabilities, error) {
 	models, err := parseProviderModels(raw, parseDefaultModel(defaults))
 	if err != nil {
 		return agent.Capabilities{}, err
@@ -22,7 +22,7 @@ func parseProviderCatalog(raw []byte, help, defaults string) (agent.Capabilities
 		Label:       "Kimi",
 		Source:      agent.CapabilitySourceLive,
 		Models:      agent.WithAutoModel(models, "Kimi default"),
-		Modes:       agent.ProviderModes(strings.Contains(help, "--plan")),
+		Modes:       agent.ProviderModes(false),
 		DefaultMode: agent.RunModeDefault,
 	}, nil
 }
@@ -103,13 +103,6 @@ func parseModel(
 		}
 		return rawString(object, keys...)
 	}
-	values := func(keys ...string) []string {
-		if result, exists := rawStringList(overrides, keys...); exists {
-			return result
-		}
-		result, _ := rawStringList(object, keys...)
-		return result
-	}
 
 	providerModel := strings.TrimSpace(value("model"))
 	displayName := value("display_name", "displayName")
@@ -129,44 +122,14 @@ func parseModel(
 		}
 	}
 
-	reasoning := []agent.CapabilityOption{}
-	for _, effort := range values("support_efforts", "supportEfforts") {
-		effort = agent.NormalizeCapabilityValue(effort)
-		if effort == "" {
-			continue
-		}
-		if len(reasoning) == 0 {
-			reasoning = append(reasoning, agent.AutoOption())
-		}
-		reasoning = append(reasoning, agent.CapabilityOption{
-			Value: effort,
-			Label: capabilityLabel(effort),
-		})
-	}
-	defaultEffort := agent.NormalizeCapabilityValue(value("default_effort", "defaultEffort"))
-	if !hasCapabilityOption(reasoning, defaultEffort) {
-		defaultEffort = ""
-	}
+	// Prompt mode cannot apply the selected effort to every configured model.
+	// Do not advertise a per-run control that would silently use the default.
 	return agent.ModelCapability{
-		ID:                     alias,
-		Label:                  displayName,
-		Description:            description,
-		ProviderDefault:        alias == globalDefault,
-		ReasoningEfforts:       reasoning,
-		DefaultReasoningEffort: defaultEffort,
+		ID:              alias,
+		Label:           displayName,
+		Description:     description,
+		ProviderDefault: alias == globalDefault,
 	}
-}
-
-func hasCapabilityOption(options []agent.CapabilityOption, value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, option := range options {
-		if option.Value == value {
-			return true
-		}
-	}
-	return false
 }
 
 func rawString(object rawObject, keys ...string) string {
@@ -196,20 +159,6 @@ func parseDefaultModel(output string) string {
 	return ""
 }
 
-func rawStringList(object rawObject, keys ...string) ([]string, bool) {
-	for _, key := range keys {
-		raw := object[key]
-		if len(raw) == 0 {
-			continue
-		}
-		var values []string
-		if json.Unmarshal(raw, &values) == nil {
-			return values, true
-		}
-	}
-	return nil, false
-}
-
 func normalizeKimiModel(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 256 {
@@ -221,20 +170,4 @@ func normalizeKimiModel(value string) string {
 		}
 	}
 	return value
-}
-
-func capabilityLabel(value string) string {
-	if strings.EqualFold(value, "xhigh") {
-		return "XHigh"
-	}
-	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '-' || r == '_' })
-	for index, part := range parts {
-		if part != "" {
-			parts[index] = strings.ToUpper(part[:1]) + part[1:]
-		}
-	}
-	if len(parts) == 0 {
-		return value
-	}
-	return strings.Join(parts, " ")
 }
