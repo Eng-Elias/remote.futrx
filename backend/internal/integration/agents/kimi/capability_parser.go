@@ -131,42 +131,8 @@ func parseModel(
 		}
 	}
 
-	caps := values("capabilities")
-	alwaysThinking := false
-	canThink := false
-	modalities := []string{"text"}
-	for _, capability := range caps {
-		switch capability {
-		case "thinking":
-			canThink = true
-		case "always_thinking":
-			canThink = true
-			alwaysThinking = true
-		case "image_in":
-			modalities = append(modalities, "image")
-		case "video_in":
-			modalities = append(modalities, "video")
-		case "audio_in":
-			modalities = append(modalities, "audio")
-		}
-	}
-	efforts := values("support_efforts", "supportEfforts")
-	reasoning := []agent.CapabilityOption{}
-	if len(efforts) > 0 || canThink {
-		reasoning = append(reasoning, agent.AutoOption())
-		if !alwaysThinking {
-			reasoning = append(reasoning, agent.CapabilityOption{Value: "off", Label: "Off"})
-		}
-		if len(efforts) == 0 {
-			efforts = []string{"on"}
-		}
-		for _, effort := range efforts {
-			effort = agent.NormalizeCapabilityValue(effort)
-			if effort != "" && !hasCapabilityOption(reasoning, effort) {
-				reasoning = append(reasoning, agent.CapabilityOption{Value: effort, Label: capabilityLabel(effort)})
-			}
-		}
-	}
+	traits := parseModelTraits(values("capabilities"))
+	reasoning := traits.reasoningOptions(values("support_efforts", "supportEfforts"))
 	defaultEffort := agent.NormalizeCapabilityValue(value("default_effort", "defaultEffort"))
 	if !hasCapabilityOption(reasoning, defaultEffort) {
 		defaultEffort = ""
@@ -178,7 +144,7 @@ func parseModel(
 		ProviderDefault:        alias == globalDefault,
 		ReasoningEfforts:       reasoning,
 		DefaultReasoningEffort: defaultEffort,
-		InputModalities:        modalities,
+		InputModalities:        traits.modalities,
 	}
 }
 
