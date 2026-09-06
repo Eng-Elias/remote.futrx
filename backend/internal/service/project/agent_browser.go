@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -44,8 +45,8 @@ func newAgentBrowsers(browser ContainerBrowser, projects projectLister) *agentBr
 }
 
 // start provisions the Agent Browser for a project whose container is already
-// running, ensuring the stack in the background. Idempotent while a start is
-// already in flight.
+// running, ensuring its broker context (or legacy stack) in the background.
+// It is idempotent while a start is already in flight.
 func (b *agentBrowsers) start(ctx context.Context, id ID, m Meta) (AgentBrowserInfo, error) {
 	if b.browser == nil || m.ContainerName == "" {
 		return AgentBrowserInfo{}, errors.New("project has no container to run the browser in")
@@ -113,9 +114,8 @@ func (b *agentBrowsers) status(ctx context.Context, id ID, m Meta) (AgentBrowser
 	return info, nil
 }
 
-// stop tears down the Agent Browser stack in the project's container, leaving
-// the container running and the persistent browser profile on disk so logins
-// survive.
+// stop tears down the project's Agent Browser context (or legacy stack),
+// leaving the project container and persisted login state intact.
 func (b *agentBrowsers) stop(ctx context.Context, id ID, m Meta) error {
 	if b.browser == nil || m.ContainerName == "" {
 		b.clearState(id)
@@ -130,12 +130,25 @@ func (b *agentBrowsers) stop(ctx context.Context, id ID, m Meta) error {
 	return nil
 }
 
-// stopView tears down only the human noVNC layer.
+// stopView tears down only the human view while leaving agent access ready.
 func (b *agentBrowsers) stopView(ctx context.Context, m Meta) error {
 	if b.browser == nil || m.ContainerName == "" {
 		return nil
 	}
 	return b.browser.StopView(ctx, m.ContainerName)
+}
+
+func (b *agentBrowsers) viewTarget(ctx context.Context, m Meta) (AgentBrowserViewTarget, error) {
+	if b.browser == nil || m.ContainerName == "" {
+		return AgentBrowserViewTarget{}, ErrAgentBrowserViewUnavailable
+	}
+	viewer, ok := b.browser.(interface {
+		ViewTarget(context.Context, string) (AgentBrowserViewTarget, error)
+	})
+	if !ok {
+		return AgentBrowserViewTarget{}, ErrAgentBrowserViewUnavailable
+	}
+	return viewer.ViewTarget(ctx, m.ContainerName)
 }
 
 // stopBeforeUpgrade stops Chromium gracefully so it can remove its Singleton*
@@ -151,6 +164,29 @@ func (b *agentBrowsers) stopBeforeUpgrade(ctx context.Context, id ID, containerN
 	}
 	b.clearState(id)
 	b.forgetActivity(id)
+}
+
+// delete removes broker-owned login state in addition to stopping the active
+// context. Legacy runtimes fall back to Stop because their profile is removed
+// with the project's workspace directory.
+func (b *agentBrowsers) delete(ctx context.Context, id ID, containerName string) error {
+	if b.browser == nil {
+		return nil
+	}
+	var err error
+	if deleter, ok := b.browser.(interface {
+		Delete(context.Context, string) error
+	}); ok {
+		err = deleter.Delete(ctx, containerName)
+	} else {
+		err = b.browser.Stop(ctx, containerName)
+	}
+	if err != nil {
+		return fmt.Errorf("delete agent browser state for %s: %w", containerName, err)
+	}
+	b.clearState(id)
+	b.forgetActivity(id)
+	return nil
 }
 
 func (b *agentBrowsers) ensureStarted(id ID, startID int64, m Meta) {

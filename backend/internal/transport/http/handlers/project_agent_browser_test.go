@@ -12,6 +12,7 @@ import (
 
 	serviceproject "github.com/futrx-com/remote.futrx.com/internal/service/project"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileproject"
+	"github.com/gorilla/websocket"
 )
 
 func TestProjectAgentBrowserRoutes(t *testing.T) {
@@ -122,6 +123,83 @@ func TestProjectAgentBrowserRouteMethods(t *testing.T) {
 	}
 }
 
+func TestProjectAgentBrowserSharedViewProxy(t *testing.T) {
+	type observedRequest struct {
+		authorization string
+		cookie        string
+		path          string
+	}
+	observed := make(chan observedRequest, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observed <- observedRequest{
+			authorization: r.Header.Get("Authorization"),
+			cookie:        r.Header.Get("Cookie"),
+			path:          r.URL.Path,
+		}
+		connection, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		_ = connection.WriteMessage(websocket.TextMessage, []byte("browser-ready"))
+	}))
+	defer upstream.Close()
+
+	handler, project := newSharedAgentBrowserProjectHandler(t, serviceproject.AgentBrowserViewTarget{
+		URL:         upstream.URL + "/view",
+		BearerToken: "project-scoped-token",
+	})
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/projects/"+string(project.ID)+"/agent-browser", nil)
+	statusRec := httptest.NewRecorder()
+	handler.HandleResource(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status agentBrowserResponse
+	if err := json.NewDecoder(statusRec.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := "/api/projects/" + string(project.ID) + "/agent-browser/view"
+	if status.Status != serviceproject.AgentBrowserStatusReady || status.URL != wantPath || status.Port != 0 {
+		t.Fatalf("shared status = %#v, want URL %q", status, wantPath)
+	}
+
+	application := httptest.NewServer(http.HandlerFunc(handler.HandleResource))
+	defer application.Close()
+	viewURL := "ws" + strings.TrimPrefix(application.URL, "http") + wantPath
+	header := http.Header{"Origin": []string{application.URL}, "Cookie": []string{"remote_session=must-not-leak"}}
+	connection, response, err := websocket.DefaultDialer.Dial(viewURL, header)
+	if err != nil {
+		if response != nil {
+			defer response.Body.Close()
+		}
+		t.Fatalf("dial browser view: %v", err)
+	}
+	defer connection.Close()
+	_, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(payload) != "browser-ready" {
+		t.Fatalf("browser view payload = %q", payload)
+	}
+	request := <-observed
+	if request.authorization != "Bearer project-scoped-token" || request.cookie != "" || request.path != "/view" {
+		t.Fatalf("proxied request = %#v", request)
+	}
+
+	badHeader := http.Header{"Origin": []string{"https://untrusted.example"}}
+	badConnection, response, err := websocket.DefaultDialer.Dial(viewURL, badHeader)
+	if badConnection != nil {
+		badConnection.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin dial error=%v response=%v", err, response)
+	}
+	response.Body.Close()
+}
+
 func TestProjectResourceLimitsRoute(t *testing.T) {
 	handler, containers, project := newAgentBrowserProjectHandler(t)
 
@@ -212,6 +290,17 @@ type fakeProjectBrowser struct {
 	containers *fakeProjectContainers
 }
 
+type fakeSharedProjectBrowser struct {
+	fakeProjectBrowser
+	target serviceproject.AgentBrowserViewTarget
+}
+
+func (fakeSharedProjectBrowser) Port() int { return 0 }
+
+func (f fakeSharedProjectBrowser) ViewTarget(context.Context, string) (serviceproject.AgentBrowserViewTarget, error) {
+	return f.target, nil
+}
+
 func (f fakeProjectBrowser) Ensure(ctx context.Context, containerName string) error {
 	return f.containers.ensureBrowser(ctx, containerName)
 }
@@ -229,6 +318,33 @@ func (f fakeProjectBrowser) Status(ctx context.Context, containerName string) (s
 }
 
 func (fakeProjectBrowser) Port() int { return 6080 }
+
+func newSharedAgentBrowserProjectHandler(t *testing.T, target serviceproject.AgentBrowserViewTarget) (*ProjectHandler, serviceproject.Meta) {
+	t.Helper()
+	repo, err := fileproject.NewWithWorkspaceRoot(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	containers := newFakeProjectContainers()
+	containers.agentBrowserRunning = true
+	containers.agentBrowserViewRunning = true
+	projects := serviceproject.New(repo, serviceproject.ContainerDependencies{
+		Lifecycle:   containers,
+		Environment: containers,
+		Inspector:   containers,
+		Network:     containers,
+		Listeners:   containers,
+		Browser: fakeSharedProjectBrowser{
+			fakeProjectBrowser: fakeProjectBrowser{containers: containers},
+			target:             target,
+		},
+	}, nil, nil)
+	project, err := projects.Create(context.Background(), serviceproject.CreateInput{Name: "Shared Browser Project"}, "user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewProjectHandler(projects, nil, nil, "remote.futrx.com"), project
+}
 
 func (f *fakeProjectContainers) Available() bool { return true }
 

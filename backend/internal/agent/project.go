@@ -2,6 +2,11 @@ package agent
 
 import "context"
 
+const (
+	BrowserMCPURLEnvironment   = "REMOTE_BROWSER_MCP_URL"
+	BrowserMCPTokenEnvironment = "REMOTE_BROWSER_MCP_TOKEN"
+)
+
 // ProjectWorkspacePath is the stable mount point for a project's workspace
 // inside its execution container. Host-side project paths must never be sent
 // to an in-container agent process.
@@ -54,6 +59,30 @@ type PreparedProject struct {
 	ID            ProjectID
 	ContainerName string
 	Secrets       []ProjectSecret
+	Browser       *BrowserConnection
+}
+
+// BrowserConnection is a per-run, project-scoped credential for the shared
+// browser MCP endpoint. It is supplied to the agent process through its
+// environment and is never persisted in the project workspace.
+type BrowserConnection struct {
+	URL   string
+	Token string
+}
+
+// WithBrowserEnvironment clones base and overlays backend-issued connection
+// values so project secrets cannot replace the scoped broker credential.
+func WithBrowserEnvironment(base map[string]string, connection *BrowserConnection) map[string]string {
+	if connection == nil || connection.URL == "" {
+		return base
+	}
+	environment := make(map[string]string, len(base)+2)
+	for key, value := range base {
+		environment[key] = value
+	}
+	environment[BrowserMCPURLEnvironment] = connection.URL
+	environment[BrowserMCPTokenEnvironment] = connection.Token
+	return environment
 }
 
 // ProjectPreparer owns the shared project lifecycle and provisioning workflow.

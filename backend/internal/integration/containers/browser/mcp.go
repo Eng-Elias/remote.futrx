@@ -1,10 +1,9 @@
 package browser
 
-// Agent Browser MCP provisioning: makes the @playwright/mcp browser tools
-// available to in-container agents, attached over CDP to the live Chrome (the
-// SAME session the user logs into). This is the tool layer behind the
-// `browser` skill — the agent calls browser_navigate / browser_snapshot /
-// browser_click / browser_type etc. instead of hand-writing Playwright recipes.
+// Agent Browser MCP provisioning publishes the provider-specific browser tool
+// configuration. Shared-broker installations point agents at an authenticated
+// HTTP MCP endpoint; legacy installations attach an in-container MCP process
+// over CDP. Both expose the same project session the user views.
 //
 // Shared agent preparation invokes this only when the selected module's factory
 // opted into MCP/core support and the run selected the browser skill, so the
@@ -12,6 +11,7 @@ package browser
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"path"
 	"time"
@@ -21,6 +21,9 @@ import (
 	serviceprofiles "github.com/futrx-com/remote.futrx.com/internal/service/container/profiles"
 	"github.com/futrx-com/remote.futrx.com/internal/shared/output"
 )
+
+//go:embed assets/mcp-remote-claude.json
+var remoteBrowserMCPConfig []byte
 
 const (
 	browserMCPInstallTimeout = 5 * time.Minute
@@ -32,11 +35,12 @@ type agentBrowserMCPProvisioner struct {
 	runner    command.Runner
 	profiles  serviceprofiles.Source
 	publisher *assets.Publisher
+	remote    bool
 }
 
-// EnsureAgentBrowserMCP installs @playwright/mcp (idempotently) and pushes the
-// profile-owned MCP templates. Cheap once installed: the npm-presence check
-// short-circuits, and templates are only re-pushed when their content changes.
+// EnsureMCP installs @playwright/mcp for legacy deployments when needed and
+// publishes the profile-owned MCP templates. Shared deployments publish only
+// the remote transport template.
 func (a *Adapter) EnsureMCP(ctx context.Context, containerName string) error {
 	return a.mcp.ensure(ctx, containerName)
 }
@@ -46,16 +50,22 @@ func (p *agentBrowserMCPProvisioner) ensure(ctx context.Context, containerName s
 		return command.ErrUnavailable
 	}
 
-	_, missing := command.RunWithTimeout(ctx, p.runner, queryTimeout, "exec", containerName, "--", "sh", "-c", "npm ls -g @playwright/mcp >/dev/null 2>&1")
-	if missing != nil {
-		out, err := command.RunWithTimeout(ctx, p.runner, browserMCPInstallTimeout, "exec", containerName, "--", "sh", "-c", "npm install -g @playwright/mcp 2>&1 | tail -3")
-		if err != nil {
-			return fmt.Errorf("install @playwright/mcp: %w; output: %s", err, output.TruncateTail(out, 1000))
+	if !p.remote {
+		_, missing := command.RunWithTimeout(ctx, p.runner, queryTimeout, "exec", containerName, "--", "sh", "-c", "npm ls -g @playwright/mcp >/dev/null 2>&1")
+		if missing != nil {
+			out, err := command.RunWithTimeout(ctx, p.runner, browserMCPInstallTimeout, "exec", containerName, "--", "sh", "-c", "npm install -g @playwright/mcp 2>&1 | tail -3")
+			if err != nil {
+				return fmt.Errorf("install @playwright/mcp: %w; output: %s", err, output.TruncateTail(out, 1000))
+			}
 		}
 	}
 
 	for _, profile := range p.profiles.Snapshot() {
 		for _, template := range profile.BrowserMCPTemplates {
+			content := template.Content
+			if p.remote {
+				content = remoteBrowserMCPConfig
+			}
 			directory := template.Directory
 			if directory == "" {
 				directory = path.Dir(template.Path)
@@ -73,7 +83,7 @@ func (p *agentBrowserMCPProvisioner) ensure(ctx context.Context, containerName s
 			if mode == "" {
 				mode = "644"
 			}
-			if err := p.publisher.Push(ctx, containerName, template.Content,
+			if err := p.publisher.Push(ctx, containerName, content,
 				template.HashPath, mode, template.Path); err != nil {
 				return err
 			}

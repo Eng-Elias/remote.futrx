@@ -4,6 +4,9 @@
 package codexharness
 
 import (
+	"strconv"
+
+	"github.com/futrx-com/remote.futrx.com/internal/agent"
 	"github.com/futrx-com/remote.futrx.com/internal/agent/provisioning"
 	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 )
@@ -40,4 +43,20 @@ func AppServerArgs(providerConfig []string, enableBrowser bool) []string {
 		)
 	}
 	return args
+}
+
+// WithBrowserConnection adds one browser MCP transport to project app-server
+// arguments. Remote broker credentials stay in the environment; a nil
+// connection preserves the legacy local Playwright MCP process.
+func WithBrowserConnection(args []string, connection *agent.BrowserConnection) []string {
+	if connection == nil || connection.URL == "" {
+		return append(args,
+			"-c", configconstants.CodexHarnessBrowserCommand,
+			"-c", configconstants.CodexHarnessBrowserArgs,
+		)
+	}
+	return append(args,
+		"-c", `mcp_servers.browser.url=`+strconv.Quote(connection.URL),
+		"-c", `mcp_servers.browser.bearer_token_env_var="`+agent.BrowserMCPTokenEnvironment+`"`,
+	)
 }

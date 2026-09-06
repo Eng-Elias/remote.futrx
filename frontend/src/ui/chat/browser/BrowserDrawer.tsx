@@ -59,7 +59,6 @@ export function BrowserDrawer({
   const [guiMode, setGuiMode] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const guiIframeRef = useRef<HTMLIFrameElement>(null);
 
   const gui = useAgentBrowserSession({ projectId, enabled: open && guiMode });
 
@@ -254,7 +253,6 @@ export function BrowserDrawer({
             reloadKey={reloadKey}
             projectName={projectName}
             resizing={resizing}
-            iframeRef={guiIframeRef}
           />
         ) : (
           <BrowserFrame

@@ -87,7 +87,7 @@ func (p *Provider) buildCmd(
 		ContainerName:      project.ContainerName,
 		PrefixEnvironment:  []string{"IS_SANDBOX=1", "HOME=/root"},
 		Secrets:            project.Secrets,
-		RuntimeEnvironment: req.RuntimeEnv,
+		RuntimeEnvironment: agent.WithBrowserEnvironment(req.RuntimeEnv, project.Browser),
 		Binary:             p.profile.CLI.Binary,
 		Arguments:          args,
 	})

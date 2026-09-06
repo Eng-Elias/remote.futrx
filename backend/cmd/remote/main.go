@@ -19,6 +19,7 @@ import (
 	remote "github.com/futrx-com/remote.futrx.com"
 	"github.com/futrx-com/remote.futrx.com/internal/agent/provisioning"
 	"github.com/futrx-com/remote.futrx.com/internal/config"
+	containerbrowser "github.com/futrx-com/remote.futrx.com/internal/integration/containers/browser"
 	"github.com/futrx-com/remote.futrx.com/internal/integration/gitcli"
 	"github.com/futrx-com/remote.futrx.com/internal/integration/hostfs"
 	"github.com/futrx-com/remote.futrx.com/internal/integration/hostinfo"
@@ -62,6 +63,10 @@ func main() {
 		agentModules.Profiles(),
 		config.ContainerStackOptions{
 			AgentInstructions: provisioning.InstructionsTemplate(publicHostname),
+			BrowserBroker: containerbrowser.BrokerConfig{
+				URL:        cfg.Browser.BrokerURL,
+				SecretFile: cfg.Browser.BrokerSecretFile,
+			},
 		},
 	)
 

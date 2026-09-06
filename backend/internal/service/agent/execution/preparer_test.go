@@ -88,6 +88,35 @@ func TestPreparerPreservesStrictSkillLinkPolicy(t *testing.T) {
 	}
 }
 
+func TestPreparerReturnsProjectScopedBrowserConnection(t *testing.T) {
+	recorder := &preparationRecorder{}
+	dependencies := preparationDependencies(recorder)
+	dependencies.Browser = preparationRemoteBrowser{
+		preparationBrowser: preparationBrowser{recorder},
+		connection: agent.BrowserConnection{
+			URL:   "http://10.0.0.1:9323/mcp",
+			Token: "project-token",
+		},
+	}
+	preparer := New(
+		preparationProjects{recorder: recorder},
+		dependencies,
+		Options{Provider: "future-agent", Profile: preparationTestProfile()},
+	)
+
+	prepared, err := preparer.Prepare(context.Background(), agent.ProjectPreparationRequest{
+		ProjectID:     "project-id",
+		EnableBrowser: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Browser == nil || prepared.Browser.URL != "http://10.0.0.1:9323/mcp" ||
+		prepared.Browser.Token != "project-token" {
+		t.Fatalf("prepared browser connection = %#v", prepared.Browser)
+	}
+}
+
 func TestPreparerRuntimeAssetFailurePreservesErrorAndShortCircuits(t *testing.T) {
 	recorder := &preparationRecorder{runtimeAssetError: errors.New("publish failed")}
 	preparer := New(
@@ -200,6 +229,16 @@ func (p preparationBrowser) EnsureMCP(context.Context, string) error {
 func (p preparationBrowser) EnsureCore(context.Context, string) error {
 	p.recorder.calls = append(p.recorder.calls, "browser-core")
 	return nil
+}
+
+type preparationRemoteBrowser struct {
+	preparationBrowser
+	connection agent.BrowserConnection
+	err        error
+}
+
+func (p preparationRemoteBrowser) Connection(context.Context, string) (agent.BrowserConnection, error) {
+	return p.connection, p.err
 }
 
 type preparationSchedule struct{ recorder *preparationRecorder }

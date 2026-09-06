@@ -221,10 +221,10 @@ Reload the preview, confirm the app is loading on the expected project preview o
 ### Agent Browser stays on starting
 
 1. Confirm the project is running.
-2. Wait for Chromium, CDP, and noVNC provisioning.
+2. Wait for the shared browser service and project context to become ready.
 3. Reload the pane.
 4. Stop the Agent Browser explicitly and start it again.
-5. Check container capacity and browser-service logs.
+5. Check `remote.futrx-browser` capacity and service logs on the host.
 
 Closing the drawer stops only the human view. The browser core can stay running until explicit stop or the idle reaper.
 

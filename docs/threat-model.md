@@ -149,10 +149,10 @@ The agent runs as root with approvals disabled and ingests untrusted content —
 
 ### 9. Agent Browser drives the user's authenticated web sessions — **High**
 
-**Elevation of privilege.** When the `browser` skill is enabled, `@playwright/mcp` attaches to the **same** Chromium the user logs into by hand ([`browser/mcp.go`](../backend/internal/integration/containers/browser/mcp.go), CDP `127.0.0.1:9222`). The agent inherits the user's cookies for whatever they signed into, and its perception loop reads page content — so a visited page can inject instructions to post, DM, buy, change settings, or read and exfiltrate private data on the user's behalf.
+**Elevation of privilege.** When the `browser` skill is enabled, the agent receives a project-scoped Streamable HTTP MCP credential for the **same BrowserContext** the user operates in the live pane ([`browser/broker.go`](../backend/internal/integration/containers/browser/broker.go), [`browser-broker/src/mcp-router.mjs`](../browser-broker/src/mcp-router.mjs)). The agent inherits that project's cookies and reads page content, so a visited page can inject instructions to post, DM, buy, change settings, or read and exfiltrate private data on the user's behalf.
 
-- **Existing mitigations:** the MCP is wired only when the skill is selected; CDP and RFB are loopback-only inside the container; the skill prose asks for confirmation before writes.
-- **Residual gap:** no technical enforcement of write-approval, no URL allowlist, unrestricted reads of authenticated content. Classic confused deputy over a live session.
+- **Existing mitigations:** the MCP is wired only when the skill is selected; HMAC credentials resolve exactly one project; agent/view credentials cannot invoke backend-only lifecycle routes; raw CDP is not exposed to containers; projects have separate BrowserContexts and encrypted storage state; private/link-local/metadata and sibling `.lxd` requests are blocked; the human WebSocket requires application membership and exact same origin; the skill prose asks for confirmation before writes.
+- **Residual gap:** no technical enforcement of write approval and unrestricted reads of authenticated public-site content. BrowserContext isolation is not a process/VM boundary: a Chromium browser-process compromise could cross projects. The broker token has project scope but no independent expiry before the installation secret rotates. This remains a classic confused deputy over a live session.
 
 ### Related: default runs and skill instructions are approval-free
 
@@ -171,10 +171,10 @@ Unprivileged LXC namespaces plus the managed resource profile are the isolation 
 
 ### 5. Cross-container lateral movement over the LXD bridge — **High** ✓ code-verified
 
-**Elevation of privilege.** All project containers share one unsegmented `lxdbr0` with no `security.mac_filtering` and no per-container firewall; the host UFW opens only 80/443, which does not filter peer-to-peer traffic. Each container exposes root-level services reachable on the bridge: code-server on `0.0.0.0:8842` (`auth: none`) and noVNC/websockify on `0.0.0.0:6080` (`x11vnc -nopw`). Code executing in container A can connect to `<B>.lxd:8842` — a root IDE/terminal in B — or `<B>.lxd:6080` — B's live authenticated browser — completely bypassing Caddy's edge auth.
+**Elevation of privilege.** All project containers share one unsegmented `lxdbr0` with no `security.mac_filtering` and no per-container firewall. Each container exposes code-server's root-capable socket-activation proxy on `0.0.0.0:8842` (`auth: none`). Code executing in container A can connect to `<B>.lxd:8842` — a root IDE/terminal in B — completely bypassing Caddy's edge auth. The active Agent Browser no longer exposes noVNC, RFB, or CDP in project containers; its host bridge listener requires a project-scoped bearer credential.
 
-- **Existing mitigations:** code-server binds loopback behind the `:8842` socket-activation proxy; CDP and raw RFB are loopback-only; Caddy gates the *edge*.
-- **Residual gap:** nothing gates the direct bridge path. Precondition is only code execution in one container — the platform's core function — so prompt-injection-to-lateral-movement is a first-class path. Fix with LXD network ACLs or per-container nftables default-deny for peer ingress on 8842/6080/9222/5900, or bind those services host-only.
+- **Existing mitigations:** code-server binds loopback behind the `:8842` socket-activation proxy; the browser broker authenticates its bridge API and rejects a token when its project identity differs from the MCP session.
+- **Residual gap:** nothing gates the direct bridge path to code-server. Precondition is only code execution in one container — the platform's core function — so prompt-injection-to-lateral-movement is a first-class path. Fix with LXD network ACLs or per-container nftables default-deny for peer ingress on 8842, or bind that service host-only. Legacy browser scripts remain in workspaces for rollback and must not be manually started as unauthenticated bridge services.
 - *Correction to earlier analysis:* `ipv4.firewall` **is** enabled by `lxd init --auto`, but it governs host-bridge NAT/DHCP, not inter-container isolation, so the conclusion stands.
 
 ### 13. A single workspace can exhaust host disk — **High** ✓ code-verified
@@ -186,7 +186,7 @@ Unprivileged LXC namespaces plus the managed resource profile are the isolation 
 
 ### Related: `security.nesting=true` fleet-wide
 
-Every container gets `security.nesting=true` ([`resources/manager.go`](../backend/internal/integration/containers/resources/manager.go)), which widens the kernel attack surface for a container-escape attempt. Chromium currently starts with `--no-sandbox`, so nesting is not providing a Chromium sandbox. Containers are unprivileged (no `security.privileged` anywhere), which is the main mitigation. Also note resource-cap convergence on the start path swallows its error (`_ = s.resources.Ensure(...)`), so a container can run without the intended default profile limits until a later successful reconcile.
+Every container gets `security.nesting=true` ([`resources/manager.go`](../backend/internal/integration/containers/resources/manager.go)), which widens the kernel attack surface for a container-escape attempt. The active shared Chromium instead runs on the host as the dedicated unprivileged `remote-browser` account with Chromium's namespace sandbox enabled; the retained legacy container launcher still uses `--no-sandbox`. Containers are unprivileged (no `security.privileged` anywhere), which is the main mitigation. Also note resource-cap convergence on the start path swallows its error (`_ = s.resources.Ensure(...)`), so a container can run without the intended default profile limits until a later successful reconcile.
 
 ---
 

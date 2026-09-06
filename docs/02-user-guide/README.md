@@ -95,7 +95,7 @@ The durable center is the project, not one chat or one container generation.
 - Claude, Codex, MiniMax, Kimi, and Antigravity provider homes are separate durable
   mounts. Antigravity persists only `/root/.gemini/antigravity-cli`, not the
   entire `.gemini` tree.
-- The Agent Browser profile lives in the workspace, so site sessions can survive container replacement.
+- Agent Browser login storage is encrypted on the host, so site sessions can survive context and container replacement.
 - Chat metadata and event history live in the host control plane.
 - Scheduled-task definitions, claims, and run state live in the host control
   plane.

@@ -289,7 +289,13 @@ func (s *Service) Delete(ctx context.Context, id ID) error {
 	if err != nil {
 		return err
 	}
-	s.browsers.clearState(id)
+	if m.ContainerName != "" {
+		if err := s.browsers.delete(ctx, id, m.ContainerName); err != nil {
+			return err
+		}
+	} else {
+		s.browsers.clearState(id)
+	}
 	if s.containerLifecycle != nil && m.ContainerName != "" {
 		if err := s.containerLifecycle.Delete(ctx, m.ContainerName); err != nil {
 			log.Printf("projects: delete container %s: %v", m.ContainerName, err)
@@ -552,9 +558,8 @@ func (s *Service) AgentBrowserStatus(ctx context.Context, id ID) (AgentBrowserIn
 	return s.browsers.status(ctx, id, m)
 }
 
-// StopAgentBrowser tears down the Agent Browser stack in the project's
-// container, leaving the container running and the persistent browser
-// profile on disk so logins survive.
+// StopAgentBrowser tears down the project's Agent Browser context (or legacy
+// stack), leaving the container running and persisted login state intact.
 func (s *Service) StopAgentBrowser(ctx context.Context, id ID) error {
 	m, err := s.Get(ctx, id)
 	if err != nil {
@@ -563,13 +568,26 @@ func (s *Service) StopAgentBrowser(ctx context.Context, id ID) error {
 	return s.browsers.stop(ctx, id, m)
 }
 
-// StopAgentBrowserView tears down only the human noVNC layer.
+// StopAgentBrowserView tears down only the human browser view.
 func (s *Service) StopAgentBrowserView(ctx context.Context, id ID) error {
 	m, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	return s.browsers.stopView(ctx, m)
+}
+
+// AgentBrowserViewTarget returns the private broker upstream for the already
+// authorized HTTP transport. The target credential never crosses the API.
+func (s *Service) AgentBrowserViewTarget(ctx context.Context, id ID) (AgentBrowserViewTarget, error) {
+	if !ValidID(id) {
+		return AgentBrowserViewTarget{}, ErrInvalidID
+	}
+	m, err := s.Get(ctx, id)
+	if err != nil {
+		return AgentBrowserViewTarget{}, err
+	}
+	return s.browsers.viewTarget(ctx, m)
 }
 
 // StartAgentBrowserReaper stops browser stacks that have had no agent or pane

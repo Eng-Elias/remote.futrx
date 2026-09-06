@@ -62,6 +62,31 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  browser-broker:
+    name: browser broker (npm test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: browser-broker
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser-broker/package-lock.json
+      - name: Install dependencies
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci
+      - name: Install sandboxed Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run broker tests with headed Chromium
+        env:
+          BROWSER_BROKER_INTEGRATION: "1"
+        run: xvfb-run -a -s '-screen 0 1280x720x24 -nolisten tcp' npm test
+
   shell:
     name: infra shell tests
     runs-on: ubuntu-latest

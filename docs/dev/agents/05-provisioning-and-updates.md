@@ -128,7 +128,7 @@ image builder:
 2. verifies IPv4 egress;
 3. generates the shared system/Node/tool recipe plus every project profile's
    CLI install;
-4. installs Agent Browser/Chromium and code-server;
+4. installs the legacy Agent Browser fallback and code-server (the active shared Chromium broker is installed once on the host);
 5. stops the builder and publishes `futrx-remote-dev-base`;
 6. removes the disposable builder.
 

@@ -165,16 +165,16 @@ coalesce into one follow-up under the default overlap policy.
 
 | Feature | How to use it | Boundary |
 | --- | --- | --- |
-| Start human browser view | Toggle the key control in Browser | Starts project Chromium/noVNC as needed |
-| Share login with agent | Sign in visually, then select `browser` skill | Claude, Codex, and MiniMax share the same profile/window |
+| Start human browser view | Toggle the key control in Browser | Starts the project's isolated context in shared Chromium |
+| Share login with agent | Sign in visually, then select `browser` skill | Claude, Codex, and MiniMax share only that project's context |
 | Human intervention | Type or click in the live pane | Same session as agent |
-| Reload view | Use reload while ready | Reloads noVNC iframe |
+| Reload view | Use reload while ready | Reconnects the live screencast |
 | Close drawer | Close Browser | Stops only the human view |
-| Stop complete stack | Use the square stop control | Stops browser core and view; keeps profile |
-| Persist site sessions | Reopen the project browser | Profile lives in workspace |
+| Stop project browser | Use the square stop control | Saves state and closes the context and view |
+| Persist site sessions | Reopen the project browser | Encrypted cookie/local-storage state lives on the host |
 | Automatic reaping | Leave view and agent inactive | Stops after roughly 20 minutes |
 
-There is one fixed 1366×768 browser session per project, unrestricted network egress, and no per-task browser isolation.
+There is one fixed 1280×720 browser session per project and no per-task browser isolation. Public internet access is allowed; private, metadata, and sibling-project browser targets are blocked.
 
 ## Git history
 

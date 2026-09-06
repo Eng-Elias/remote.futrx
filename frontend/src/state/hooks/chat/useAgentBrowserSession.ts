@@ -7,10 +7,10 @@ import {
 import type { AgentBrowserInfo, AgentBrowserStatus } from "../../../models/project";
 import { agentBrowserStatusState } from "./agentBrowserStatusState.ts";
 
-// useAgentBrowserSession asks the backend to bring up the in-container Agent
+// useAgentBrowserSession asks the backend to bring up the project's Agent
 // Browser and tracks its status over project REST endpoints. Pixels do NOT
-// flow here: once ready, the noVNC view loads as an iframe from the dev-URL
-// proxy. Closing the drawer stops only the human noVNC view; the agent-facing
+// flow here: once ready, the shared context stream (or legacy noVNC fallback)
+// loads in the drawer. Closing it stops only the human view; the agent-facing
 // browser core keeps running until explicitly stopped or reaped for idleness.
 export function useAgentBrowserSession({ projectId, enabled }: { projectId: string; enabled: boolean }) {
   const [status, setStatus] = useState<AgentBrowserStatus>("idle");

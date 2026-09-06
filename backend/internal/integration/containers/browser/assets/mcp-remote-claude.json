@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "browser": {
+      "type": "http",
+      "url": "${REMOTE_BROWSER_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${REMOTE_BROWSER_MCP_TOKEN}"
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 [Unit]
 Description=remote.futrx — self-hosted agent chat UI
-After=network.target
+After=network.target remote.futrx-browser.service
+Wants=remote.futrx-browser.service
 
 [Service]
 ExecStart=${INSTALL_DIR}/backend/remote
@@ -12,6 +13,8 @@ Environment=PATH=${HOST_CLI_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/u
 Environment=DATA_DIR=${INSTALL_DIR}/data
 Environment=INSTALL_DIR=${INSTALL_DIR}
 Environment=BASE_URL=https://${HOSTNAME}
+Environment=BROWSER_BROKER_URL=http://${LXD_BRIDGE_IP}:9323
+Environment=BROWSER_BROKER_SECRET_FILE=${INSTALL_DIR}/data/browser-broker.secret
 # tmux server inherits this cgroup; KillMode=process keeps long-running
 # child processes (claude, codex, lxc exec) alive during a backend restart.
 KillMode=process

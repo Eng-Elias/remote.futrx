@@ -85,6 +85,19 @@ func (p *Preparer) Prepare(
 	}
 
 	prepared := agent.PreparedProject{ID: project.ID, ContainerName: project.ContainerName}
+	if request.EnableBrowser {
+		if connector, ok := p.containers.Browser.(interface {
+			Connection(context.Context, string) (agent.BrowserConnection, error)
+		}); ok {
+			connection, connectionErr := connector.Connection(ctx, project.ContainerName)
+			if connectionErr != nil {
+				return agent.PreparedProject{}, fmt.Errorf("prepare browser connection: %w", connectionErr)
+			}
+			if connection.URL != "" {
+				prepared.Browser = &connection
+			}
+		}
+	}
 	if secrets, err := p.projects.ListSecrets(ctx, project.ID); err == nil {
 		prepared.Secrets = secrets
 	}

@@ -5,6 +5,7 @@ package browser
 import (
 	"context"
 
+	"github.com/futrx-com/remote.futrx.com/internal/agent"
 	serviceproject "github.com/futrx-com/remote.futrx.com/internal/service/project"
 )
 
@@ -34,11 +35,19 @@ type Tooling interface {
 	EnsureNesting(ctx context.Context, containerName string) error
 }
 
+// Connector supplies scoped agent and human-view connections when the
+// browser runtime is hosted outside the project container.
+type Connector interface {
+	Connection(ctx context.Context, containerName string) (agent.BrowserConnection, error)
+	ViewTarget(ctx context.Context, containerName string) (serviceproject.AgentBrowserViewTarget, error)
+}
+
 // Dependencies groups the independently replaceable browser adapters.
 type Dependencies struct {
 	Provisioner StackProvisioner
 	Runtime     Runtime
 	Tooling     Tooling
+	Connector   Connector
 }
 
 // Service owns the provision-before-start policy and exposes browser
@@ -47,6 +56,7 @@ type Service struct {
 	provisioner StackProvisioner
 	runtime     Runtime
 	tooling     Tooling
+	connector   Connector
 	port        int
 }
 
@@ -55,14 +65,15 @@ func NewService(deps Dependencies, port int) *Service {
 		provisioner: deps.Provisioner,
 		runtime:     deps.Runtime,
 		tooling:     deps.Tooling,
+		connector:   deps.Connector,
 		port:        port,
 	}
 }
 
-// Port returns the in-container noVNC port.
+// Port returns the legacy noVNC port, or zero for the shared broker view.
 func (s *Service) Port() int { return s.port }
 
-// Ensure provisions the browser stack before starting its core and view.
+// Ensure provisions the selected browser runtime before starting core and view.
 func (s *Service) Ensure(ctx context.Context, containerName string) error {
 	return s.provisionAndStart(ctx, containerName, s.runtime.Start)
 }
@@ -72,7 +83,7 @@ func (s *Service) EnsureCore(ctx context.Context, containerName string) error {
 	return s.provisionAndStart(ctx, containerName, s.runtime.StartCore)
 }
 
-// EnsureView provisions the browser stack before starting its noVNC view.
+// EnsureView provisions the browser runtime before starting its human view.
 func (s *Service) EnsureView(ctx context.Context, containerName string) error {
 	return s.provisionAndStart(ctx, containerName, s.runtime.StartView)
 }
@@ -89,6 +100,18 @@ func (s *Service) provisionAndStart(
 }
 
 func (s *Service) Stop(ctx context.Context, containerName string) error {
+	return s.runtime.Stop(ctx, containerName)
+}
+
+// Delete stops the browser and removes broker-owned project state when the
+// selected runtime supports it. Legacy profile data is removed with the
+// project's workspace by the normal project deletion path.
+func (s *Service) Delete(ctx context.Context, containerName string) error {
+	if deleter, ok := s.runtime.(interface {
+		Delete(context.Context, string) error
+	}); ok {
+		return deleter.Delete(ctx, containerName)
+	}
 	return s.runtime.Stop(ctx, containerName)
 }
 
@@ -118,4 +141,22 @@ func (s *Service) EnsureMCP(ctx context.Context, containerName string) error {
 
 func (s *Service) EnsureNesting(ctx context.Context, containerName string) error {
 	return s.tooling.EnsureNesting(ctx, containerName)
+}
+
+// Connection returns the scoped remote MCP endpoint. A zero connection keeps
+// legacy in-container CDP behavior for installations without the broker.
+func (s *Service) Connection(ctx context.Context, containerName string) (agent.BrowserConnection, error) {
+	if s.connector == nil {
+		return agent.BrowserConnection{}, nil
+	}
+	return s.connector.Connection(ctx, containerName)
+}
+
+// ViewTarget returns the internal WebSocket endpoint used by the authenticated
+// HTTP handler. The bearer credential is injected server-side.
+func (s *Service) ViewTarget(ctx context.Context, containerName string) (serviceproject.AgentBrowserViewTarget, error) {
+	if s.connector == nil {
+		return serviceproject.AgentBrowserViewTarget{}, serviceproject.ErrAgentBrowserViewUnavailable
+	}
+	return s.connector.ViewTarget(ctx, containerName)
 }

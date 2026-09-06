@@ -11,9 +11,10 @@ flowchart TD
     Checkout --> Validate["Validate distro and DNS"]
     Validate --> Deps["Install pinned host dependencies"]
     Deps --> Agents["Converge catalog-declared host agent CLIs"]
-    Agents --> Build["Build frontend and Go backend"]
+    Agents --> Browser["Install Chromium and shared browser broker"]
+    Browser --> Build["Build frontend and Go backend"]
     Build --> Proxy["Render, validate, and reload Caddy"]
-    Proxy --> Service["Install and start systemd backend service"]
+    Proxy --> Service["Install and start browser + backend services"]
     Service --> Health["Poll backend health for up to 30 seconds"]
     Health --> Image["Build reusable LXD workspace image"]
     Image --> SSH["Disable SSH password authentication"]
@@ -32,6 +33,7 @@ one convergence cannot mix policy from two commits.
 | --- | --- |
 | `/opt/remote.futrx` | Application checkout, built binary, frontend assets, infrastructure scripts, and data |
 | `remote.futrx.service` | Go backend on loopback port `7682` by default |
+| `remote.futrx-browser.service` | Dedicated unprivileged broker with one headed Chromium and isolated project BrowserContexts |
 | Caddy | Public HTTPS, compression, authentication, and proxy routing |
 | LXD | Project-container runtime and base-image store |
 | Catalog-declared host agent CLIs | Local binaries for host-scoped execution and managed authentication |
@@ -128,7 +130,7 @@ sequenceDiagram
     Builder->>LXD: Delete leftover builder if present
     Builder->>Ubuntu: Launch temporary container
     Builder->>Ubuntu: Install system tools, Node, GitHub CLI, catalog-declared project CLIs
-    Builder->>Ubuntu: Install Chromium and Agent Browser
+    Builder->>Ubuntu: Install legacy Chromium fallback
     Builder->>Ubuntu: Install code-server
     Builder->>Ubuntu: Stop container
     Builder->>Alias: Publish reusable image
@@ -287,12 +289,13 @@ The server-info settings page reports host, CPU, memory, storage, network, and G
 - SSH password and keyboard-interactive authentication are disabled after install.
 - On-demand TLS issuance is restricted to valid, existing project hosts.
 - Project containers are unprivileged and receive host workspaces through mapped ownership.
-- Project containers currently share the LXD bridge without lateral ACLs; code-server and noVNC rely on Caddy for public authentication and do not independently authenticate direct bridge traffic.
+- Project containers currently share the LXD bridge without lateral ACLs; code-server still relies on Caddy for public authentication and does not independently authenticate direct bridge traffic. The host browser broker separately requires project-scoped bearer authentication.
 
 ## Operational commands
 
 ```bash
 systemctl status remote.futrx
+systemctl status remote.futrx-browser
 systemctl status caddy
 journalctl -u remote.futrx -f
 sudo bash /opt/remote.futrx/infra/update.sh
