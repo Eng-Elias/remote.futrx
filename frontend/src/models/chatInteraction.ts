@@ -1,5 +1,10 @@
+export type ApprovalReviewAction = "allow_once" | "allow_session" | "deny" | "revise_plan" | "reject_plan";
+
 export type ChatInteractionIntent =
   | { kind: "answer_questions"; answers: Record<string, string[]> }
+  | { kind: "dismiss_questions" }
+  | { kind: "review_approval"; action: ApprovalReviewAction; feedback: string; optionLabel?: string }
+  | { kind: "control_agent"; action: "stop" | "run_in_background" }
   | { kind: "approve"; scope: "once" | "session" }
   | { kind: "deny_approval" }
   | { kind: "cancel_approval" }

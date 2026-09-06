@@ -1,33 +1,19 @@
-import { useState } from "preact/hooks";
-import type { ChatInteractionQuestion } from "../../../models/chatInteraction";
+import { useQuestionForm } from "../../../state/hooks/chat/useQuestionForm";
 import { DecisionButton } from "./InteractionControls";
 import type { InteractionFormProps } from "./types";
 
 export function UserInputInteractionForm({ input, disabled, onSubmit }: InteractionFormProps) {
-  const questions = Array.isArray(input.questions) ? input.questions as ChatInteractionQuestion[] : [];
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [other, setOther] = useState<Record<string, string>>({});
-  const complete = questions.length > 0 && questions.every((question, index) => {
-    const id = question.id || String(index);
-    return (answers[id]?.length ?? 0) > 0 || (other[id] || "").trim().length > 0;
-  });
+  const form = useQuestionForm(input);
   function submit() {
-    const encoded: Record<string, string[]> = {};
-    questions.forEach((question, index) => {
-      const id = question.id || String(index);
-      const text = (other[id] || "").trim();
-      encoded[id] = [...(answers[id] || []), ...(text ? [text] : [])];
-    });
-    onSubmit({ kind: "answer_questions", answers: encoded });
+    onSubmit({ kind: "answer_questions", answers: form.answers() });
   }
   return (
     <div class="space-y-4">
       {typeof input.autoResolutionMs === "number" && (
         <p class="text-[10px] text-ink-400">The agent may auto-resolve this request after {Math.ceil(input.autoResolutionMs / 1000)} seconds.</p>
       )}
-      {questions.map((question, index) => {
-        const id = question.id || String(index);
-        const options = Array.isArray(question.options) ? question.options : [];
+      {form.questions.map((row) => {
+        const { id, question, options } = row;
         return (
           <fieldset key={id} class="space-y-2" disabled={disabled}>
             <legend class="text-[13px] font-medium leading-snug text-ink-100">
@@ -39,15 +25,10 @@ export function UserInputInteractionForm({ input, disabled, onSubmit }: Interact
             {options.length > 0 && (
               <div class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                 {options.map((option, optionIndex) => {
-                  const value = option.id ?? option.label ?? "";
-                  const selected = answers[id]?.includes(value) ?? false;
+                  const selected = option.selected;
                   return (
                     <button key={`${id}-${optionIndex}`} type="button" aria-pressed={selected}
-                      onClick={() => {
-                        setAnswers((current) => ({ ...current, [id]: question.multiSelect
-                          ? (selected ? (current[id] || []).filter((item) => item !== value) : [...(current[id] || []), value]) : [value] }));
-                        if (!question.multiSelect) setOther((current) => ({ ...current, [id]: "" }));
-                      }}
+                      onClick={() => form.select(row, option)}
                       class={`rounded-control border px-2.5 py-2 text-left text-[12px] transition ${selected ? "border-accent-blue bg-accent-blue/10 text-ink-100" : "border-line bg-surface text-ink-200 hover:border-line-strong"}`}>
                       <span class="block font-medium">{option.label}</span>
                       {option.description && <span class="mt-0.5 block text-[10px] text-ink-400">{option.description}</span>}
@@ -57,21 +38,18 @@ export function UserInputInteractionForm({ input, disabled, onSubmit }: Interact
               </div>
             )}
             {(options.length === 0 || question.isOther) && (
-              <input type={question.isSecret ? "password" : "text"} value={other[id] || ""} autocomplete="off"
+              <input type={question.isSecret ? "password" : "text"} value={row.other} autocomplete="off"
                 placeholder={question.isSecret ? "Secret answer (not saved to chat history)" : "Type an answer"}
-                onInput={(event) => {
-                  setOther((current) => ({ ...current, [id]: event.currentTarget.value }));
-                  if (!question.multiSelect) setAnswers((current) => ({ ...current, [id]: [] }));
-                }}
+                onInput={(event) => form.enterText(row, event.currentTarget.value)}
                 class="h-9 w-full rounded-control border border-line bg-canvas px-2.5 text-[12px] text-ink-100 outline-none focus:border-accent-blue" />
             )}
           </fieldset>
         );
       })}
       <div class="flex gap-2">
-        <DecisionButton disabled={disabled || !complete} onClick={submit}>Send answers</DecisionButton>
+        <DecisionButton disabled={disabled || !form.complete} onClick={submit}>Send answers</DecisionButton>
         {input.allowDismiss === true && (
-          <DecisionButton disabled={disabled} onClick={() => onSubmit({ kind: "submit_provider_result", result: { dismiss: true } })}>
+          <DecisionButton disabled={disabled} onClick={() => onSubmit({ kind: "dismiss_questions" })}>
             Dismiss
           </DecisionButton>
         )}

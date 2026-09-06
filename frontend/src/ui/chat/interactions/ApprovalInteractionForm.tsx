@@ -1,3 +1,4 @@
+import type { ApprovalReviewAction } from "../../../models/chatInteraction";
 import { useState } from "preact/hooks";
 import { DecisionButton, RequestDetails } from "./InteractionControls";
 import type { InteractionFormProps } from "./types";
@@ -15,8 +16,8 @@ export function ApprovalInteractionForm({
     options?: Array<{ label: string; description?: string }>;
   } | undefined;
   const plan = display?.kind === "plan_review" ? display : undefined;
-  function decide(decision: string, selected_label?: string) {
-    onSubmit({ kind: "submit_provider_result", result: { decision, feedback, selected_label } });
+  function decide(action: ApprovalReviewAction, optionLabel?: string) {
+    onSubmit({ kind: "review_approval", action, feedback, optionLabel });
   }
   return (
     <div class="space-y-3">
@@ -34,22 +35,22 @@ export function ApprovalInteractionForm({
         />
       )}
       {plan?.options?.map((option) => (
-        <DecisionButton key={option.label} disabled={disabled} onClick={() => decide("accept", option.label)}>
+        <DecisionButton key={option.label} disabled={disabled} onClick={() => decide("allow_once", option.label)}>
           {`${option.label}${option.description ? ` — ${option.description}` : ""}`}
         </DecisionButton>
       ))}
       <div class="flex flex-wrap gap-2">
-        <DecisionButton disabled={disabled} onClick={() => input.allowFeedback ? decide("accept") : onSubmit({ kind: "approve", scope: "once" })}>
+        <DecisionButton disabled={disabled} onClick={() => input.allowFeedback ? decide("allow_once") : onSubmit({ kind: "approve", scope: "once" })}>
           Allow once
         </DecisionButton>
-        <DecisionButton disabled={disabled} onClick={() => input.allowFeedback ? decide("acceptForSession") : onSubmit({ kind: "approve", scope: "session" })}>
+        <DecisionButton disabled={disabled} onClick={() => input.allowFeedback ? decide("allow_session") : onSubmit({ kind: "approve", scope: "session" })}>
           Allow for session
         </DecisionButton>
-        <DecisionButton tone="danger" disabled={disabled} onClick={() => input.allowFeedback ? decide("decline", plan ? "Revise" : undefined) : onSubmit({ kind: "deny_approval" })}>
+        <DecisionButton tone="danger" disabled={disabled} onClick={() => input.allowFeedback ? decide(plan ? "revise_plan" : "deny") : onSubmit({ kind: "deny_approval" })}>
           {plan ? "Request revisions" : "Deny"}
         </DecisionButton>
         {plan && (
-          <DecisionButton tone="danger" disabled={disabled} onClick={() => decide("decline", "Reject and Exit")}>
+          <DecisionButton tone="danger" disabled={disabled} onClick={() => decide("reject_plan")}>
             Reject and exit Plan mode
           </DecisionButton>
         )}

@@ -1,6 +1,7 @@
 import type { ChatInteractionResponder } from "../../../types/chatApi";
 import type { AssistantMessagePart } from "../../../models/chatMessage";
 import { useState } from "preact/hooks";
+import { useDelegatedAgentControls } from "../../../state/hooks/chat/useDelegatedAgentControls";
 import { ChevronDown, ChevronRight } from "../../primitives/icons";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../tool-calls/CodeBlock";
@@ -41,7 +42,8 @@ export function CollaborationCard({
     : tools.filter((tool) => tool.isError).length;
   const label = part.name || "Subagent orchestration";
   const status = part.status || "inProgress";
-  const [expanded, setExpanded] = useState(() => !isTerminalStatus(status));
+  const controls = useDelegatedAgentControls(part.data, status, onRespond);
+  const [expanded, setExpanded] = useState(() => !controls.terminal);
   return (
     <section class="my-2 overflow-hidden rounded-lg border border-line bg-surface">
       <header class="bg-tint">
@@ -73,20 +75,20 @@ export function CollaborationCard({
         {typeof part.data.prompt === "string" && (
           <p class="text-[12px] leading-relaxed text-ink-300">{part.data.prompt}</p>
         )}
-        {typeof part.data.stopInteractionId === "string" && part.data.stopInteractionId && onRespond && !isTerminalStatus(status) && (
+        {controls.canStop && (
           <div class="flex gap-2">
             <button
               type="button"
               class="rounded-control border border-line px-2 py-1 text-[11px] text-accent-red"
-              onClick={() => onRespond(part.data.stopInteractionId as string, "kimi/task", { kind: "submit_provider_result", result: { action: "cancel" } })}
+              onClick={controls.stop}
             >
               Stop agent
             </button>
-            {part.data.runInBackground !== true && (
+            {controls.canRunInBackground && (
               <button
                 type="button"
                 class="rounded-control border border-line px-2 py-1 text-[11px] text-ink-200"
-                onClick={() => onRespond(part.data.stopInteractionId as string, "kimi/task", { kind: "submit_provider_result", result: { action: "detach" } })}
+                onClick={controls.runInBackground}
               >
                 Run in background
               </button>
@@ -240,10 +242,6 @@ function SubagentToolDetails({ tool, index }: { tool: SubagentTool; index: numbe
 
 function statusLabel(status: string): string {
   return status === "turnEnded" ? "turn ended" : status;
-}
-
-function isTerminalStatus(status: string): boolean {
-  return ["completed", "failed", "interrupted", "cancelled", "canceled", "turnEnded"].includes(status);
 }
 
 function emptyStateMessage(status: string): string {
