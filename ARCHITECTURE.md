@@ -238,6 +238,8 @@ A chat with **no project** ("loose chat") runs the CLI directly on the host inst
 | Web Push signing key | `DATA_DIR/webpush-vapid.json` | JSON | VAPID P-256 pair, mode 0600; rotating it invalidates every browser subscription |
 | Session key | `DATA_DIR/session.key` | 32 random bytes | mode 0600 |
 | Google OAuth secret | `DATA_DIR/oauth.json` | JSON | plaintext, mode 0600 |
+| Browser broker key | `/etc/remote.futrx/browser-broker.secret` | random key | root-owned, broker-readable; authenticates scoped access and encrypts browser state |
+| Browser web-session state | `/var/lib/remote/browser-broker/contexts` | AES-256-GCM envelopes | per-project derived keys; cookies, local storage, and IndexedDB only |
 | Provider tokens | `/root/.claude*`, `/root/.codex`, `/root/.kimi-code` | provider files | copied into every container |
 | MiniMax project state | `/var/lib/remote/projects/<slug>/agent-home/minimax` | Codex-harness files | bind-mounted to `/root/.minimax`; its API key remains in the project secret store |
 | Antigravity project auth/session | `/var/lib/remote/projects/<slug>/agent-home/antigravity` | provider files | bind-mounted to `/root/.gemini/antigravity-cli`; survives container replacement |
