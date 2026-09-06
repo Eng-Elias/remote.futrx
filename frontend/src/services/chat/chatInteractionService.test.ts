@@ -128,3 +128,24 @@ test("preserves generic results and unsupported JSON-RPC errors", () => {
     }
   );
 });
+
+test("preserves native review, dismissal, and delegated-task response payloads", () => {
+  const cases = [
+    ["kimi/approval", { decision: "accept", feedback: "", selected_label: undefined }],
+    ["kimi/approval", { decision: "acceptForSession", feedback: "Keep tests", selected_label: undefined }],
+    ["kimi/approval", { decision: "accept", feedback: "", selected_label: "Implement" }],
+    ["kimi/approval", { decision: "decline", feedback: "Change scope", selected_label: "Revise" }],
+    ["kimi/approval", { decision: "decline", feedback: "", selected_label: "Reject and Exit" }],
+    ["kimi/question", { dismiss: true }],
+    ["kimi/task", { action: "cancel" }],
+    ["kimi/task", { action: "detach" }],
+  ] as const;
+  for (const [method, result] of cases) {
+    assert.deepEqual(chatInteractionService.encodeResponse(method, {
+      kind: "submit_provider_result", result,
+    }), { result });
+  }
+  assert.deepEqual(chatInteractionService.encodeResponse("kimi/question", {
+    kind: "answer_questions", answers: { choice: ["option-id", "Other answer"], free: ["Text"] },
+  }), { result: { answers: { choice: { answers: ["option-id", "Other answer"] }, free: { answers: ["Text"] } } } });
+});
