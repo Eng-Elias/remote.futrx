@@ -2,7 +2,6 @@ package kimi
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -48,20 +47,7 @@ func (p *Provider) Run(ctx context.Context, req agent.RunRequest, emit func(agen
 	if err != nil {
 		return err
 	}
-	transport, err := startServerTransport(ctx, cmd)
-	if err == nil {
-		transport.onEvent = run.onEvent
-		err = run.execute(ctx, transport)
-		if err != nil || ctx.Err() != nil || run.interrupted {
-			run.abort(transport)
-		}
-		if closeErr := transport.close(); err == nil {
-			err = closeErr
-		}
-		if err == nil && run.failure != "" {
-			err = errors.New(run.failure)
-		}
-	}
+	err = run.executeCommand(ctx, cmd)
 	if containerName != "" && p.credentialCollector != nil {
 		syncCtx, cancel := context.WithTimeout(context.Background(), p.credentialSyncTimeout)
 		defer cancel()
@@ -69,24 +55,5 @@ func (p *Provider) Run(ctx context.Context, req agent.RunRequest, emit func(agen
 			log.Printf("kimi[%s] sync auth from %s: %v", req.ConversationID, containerName, syncErr)
 		}
 	}
-	if ctx.Err() != nil {
-		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usage.raw()})
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil
-		}
-		return ctx.Err()
-	}
-	if errors.Is(err, agent.ErrSessionNotFound) {
-		return err
-	}
-	if err != nil {
-		run.publish(agent.Event{Type: agent.EventRunFailed, Message: "Kimi run failed: " + err.Error(), IsError: true, Usage: run.usage.raw()})
-		return agent.ErrRunFailed
-	}
-	if run.interrupted {
-		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usage.raw()})
-		return nil
-	}
-	run.publish(agent.Event{Type: agent.EventRunCompleted, Usage: run.usage.raw()})
-	return nil
+	return run.finish(ctx, err)
 }
