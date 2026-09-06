@@ -50,8 +50,8 @@ func TestNativeEventsSeparateNestedAgentsAndCountStepUsageOnce(t *testing.T) {
 	emitNative(t, r, 6, false, step)
 	emitNative(t, r, 7, false, step)
 	emitNative(t, r, 8, false, `{"type":"subagent.completed","subagentId":"b","resultSummary":"child report","usage":{"inputOther":10,"output":2,"inputCacheRead":3,"inputCacheCreation":4}}`)
-	if r.usage.TotalTokens() != 19 {
-		t.Fatalf("double-counted usage: %+v", r.usage)
+	if r.usage.totals.TotalTokens() != 19 {
+		t.Fatalf("double-counted usage: %+v", r.usage.totals)
 	}
 	for _, e := range events {
 		if e.Type == agent.EventAssistantTextDelta || e.Type == agent.EventReasoningDelta {

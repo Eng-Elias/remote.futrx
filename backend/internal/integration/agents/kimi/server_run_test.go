@@ -141,21 +141,21 @@ func TestNativeDismissQuestionAcceptsDismissedResponse(t *testing.T) {
 func TestNativeCronKeepsRunOpenUntilDeletedOrOneShotFires(t *testing.T) {
 	r := newServerRun(agent.RunRequest{}, func(agent.Event) {})
 	r.session = "s"
-	r.cronTool(&childTool{Name: "CronCreate", Output: "id: once\nrecurring: false"})
+	r.cron.toolResult(&childTool{Name: "CronCreate", Output: "id: once\nrecurring: false"})
 	p := fixtureTransport(t, func(req map[string]any) (any, int) { return map[string]any{}, 0 })
 	if idle, err := r.idle(context.Background(), p); err != nil || idle {
 		t.Fatalf("idle=%t err=%v", idle, err)
 	}
 	emitNative(t, r, 1, false, `{"type":"cron.fired","origin":{"jobId":"once"}}`)
-	if len(r.cronJobs) != 0 {
+	if len(r.cron.jobs) != 0 {
 		t.Fatal("one-shot retained after firing")
 	}
-	r.cronTool(&childTool{Name: "CronCreate", Output: "id: recurring\nrecurring: true"})
+	r.cron.toolResult(&childTool{Name: "CronCreate", Output: "id: recurring\nrecurring: true"})
 	emitNative(t, r, 2, false, `{"type":"cron.fired","origin":{"jobId":"recurring"}}`)
-	if len(r.cronJobs) != 1 {
+	if len(r.cron.jobs) != 1 {
 		t.Fatal("recurring job removed on first firing")
 	}
-	r.cronTool(&childTool{Name: "CronDelete", Input: json.RawMessage(`{"id":"recurring"}`)})
+	r.cron.toolResult(&childTool{Name: "CronDelete", Input: json.RawMessage(`{"id":"recurring"}`)})
 	if idle, err := r.idle(context.Background(), p); err != nil || !idle {
 		t.Fatalf("idle=%t err=%v", idle, err)
 	}

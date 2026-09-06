@@ -75,9 +75,7 @@ func (r *serverRun) openSession(ctx context.Context, p *serverTransport) error {
 		return errors.New("Kimi did not return a session ID")
 	}
 	r.session = session.ID
-	if session.Metadata.CronJobs != nil {
-		r.cronJobs = session.Metadata.CronJobs
-	}
+	r.cron.restore(session.Metadata.CronJobs)
 	r.publish(agent.Event{Type: agent.EventSessionUpdated})
 	var snapshot nativeSnapshot
 	if err := p.api(ctx, "GET", r.path()+"/snapshot", nil, &snapshot); err != nil {

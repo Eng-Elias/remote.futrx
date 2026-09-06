@@ -6,35 +6,62 @@ import (
 	"strings"
 )
 
+type cronTracker struct {
+	jobs  map[string]bool
+	dirty bool
+}
+
+func newCronTracker() cronTracker { return cronTracker{jobs: map[string]bool{}} }
+func (c *cronTracker) restore(jobs map[string]bool) {
+	if jobs != nil {
+		c.jobs = jobs
+	}
+}
+func (c *cronTracker) active() bool { return len(c.jobs) > 0 }
+func (c *cronTracker) fired(raw json.RawMessage) {
+	var fired struct {
+		Origin struct {
+			JobID string `json:"jobId"`
+			Stale bool   `json:"stale"`
+		} `json:"origin"`
+	}
+	if json.Unmarshal(raw, &fired) == nil {
+		if recurring, ok := c.jobs[fired.Origin.JobID]; ok && (!recurring || fired.Origin.Stale) {
+			delete(c.jobs, fired.Origin.JobID)
+			c.dirty = true
+		}
+	}
+}
+
 // Native cron jobs keep the session running between model turns. Their
 // lifecycle is recorded in tool results and cron.fired notifications. Mirror
 // IDs (never prompts) in session metadata so Remote can retain that behavior
 // when resuming its own sessions.
-func (r *serverRun) cronTool(t *childTool) {
+func (c *cronTracker) toolResult(t *childTool) {
 	if t.IsError {
 		return
 	}
 	switch t.Name {
 	case "CronCreate":
 		for _, job := range parseCronJobs(t.Output) {
-			r.cronJobs[job.id] = job.recurring
-			r.cronDirty = true
+			c.jobs[job.id] = job.recurring
+			c.dirty = true
 		}
 	case "CronDelete":
 		var args struct {
 			ID string `json:"id"`
 		}
 		if json.Unmarshal(t.Input, &args) == nil && args.ID != "" {
-			delete(r.cronJobs, args.ID)
-			r.cronDirty = true
+			delete(c.jobs, args.ID)
+			c.dirty = true
 		}
 	case "CronList":
 		if strings.HasPrefix(t.Output, "cron_jobs:") {
-			r.cronJobs = map[string]bool{}
+			c.jobs = map[string]bool{}
 			for _, job := range parseCronJobs(t.Output) {
-				r.cronJobs[job.id] = job.recurring
+				c.jobs[job.id] = job.recurring
 			}
-			r.cronDirty = true
+			c.dirty = true
 		}
 	}
 }
@@ -56,13 +83,13 @@ func parseCronJobs(output string) []cronJob {
 	}
 	return jobs
 }
-func (r *serverRun) saveCron(ctx context.Context, p *serverTransport) error {
-	if !r.cronDirty {
+func (c *cronTracker) save(ctx context.Context, p *serverTransport, sessionPath string) error {
+	if !c.dirty {
 		return nil
 	}
-	if err := p.api(ctx, "POST", r.path()+"/profile", nativeProfileUpdate{Metadata: &nativeCronMetadata{Jobs: r.cronJobs}}, nil); err != nil {
+	if err := p.api(ctx, "POST", sessionPath+"/profile", nativeProfileUpdate{Metadata: &nativeCronMetadata{Jobs: c.jobs}}, nil); err != nil {
 		return err
 	}
-	r.cronDirty = false
+	c.dirty = false
 	return nil
 }

@@ -96,10 +96,10 @@ func (r *serverRun) idle(ctx context.Context, p *serverTransport) (bool, error) 
 	if status.Busy {
 		return false, nil
 	}
-	if err := r.saveCron(ctx, p); err != nil {
+	if err := r.cron.save(ctx, p, r.path()); err != nil {
 		return false, err
 	}
-	if len(r.cronJobs) > 0 {
+	if r.cron.active() {
 		return false, nil
 	}
 	var tasks nativeTasks
@@ -145,7 +145,7 @@ func (r *serverRun) abort(p *serverTransport) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), configconstants.KimiRunAbortTimeout)
 	defer cancel()
-	_ = r.saveCron(ctx, p)
+	_ = r.cron.save(ctx, p, r.path())
 	// Server shutdown disposes all agents too. First persist cancellations.
 	_ = p.api(ctx, "POST", r.path()+":abort", map[string]any{}, nil)
 	var tasks nativeTasks

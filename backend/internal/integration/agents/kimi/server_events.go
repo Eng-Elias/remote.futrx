@@ -71,13 +71,11 @@ type childAgent struct {
 type serverRun struct {
 	thinking    string
 	tasks       map[string]bool
-	cronJobs    map[string]bool
-	cronDirty   bool
+	cron        cronTracker
 	compacting  bool
 	req         agent.RunRequest
 	emit        func(agent.Event)
 	session     string
-	started     time.Time
 	mainEnded   bool
 	failure     string
 	interrupted bool
@@ -85,13 +83,12 @@ type serverRun struct {
 	epoch       string
 	children    map[string]*childAgent
 	tools       map[string]*childTool
-	steps       map[string]bool
 	pending     map[string]pendingInteraction
-	usage       agent.Usage
+	usage       runUsage
 }
 
 func newServerRun(req agent.RunRequest, emit func(agent.Event)) *serverRun {
-	return &serverRun{tasks: map[string]bool{}, cronJobs: map[string]bool{}, req: req, emit: emit, started: time.Now(), children: map[string]*childAgent{}, tools: map[string]*childTool{}, steps: map[string]bool{}, pending: map[string]pendingInteraction{}, usage: agent.Usage{Model: req.Model}}
+	return &serverRun{tasks: map[string]bool{}, cron: newCronTracker(), req: req, emit: emit, children: map[string]*childAgent{}, tools: map[string]*childTool{}, pending: map[string]pendingInteraction{}, usage: newRunUsage(req.Model)}
 }
 func (r *serverRun) publish(ev agent.Event) {
 	ev.T = time.Now().UnixMilli()
@@ -99,10 +96,6 @@ func (r *serverRun) publish(ev agent.Event) {
 	ev.ConversationID = r.req.ConversationID
 	ev.SessionID = r.session
 	r.emit(ev)
-}
-func (r *serverRun) usageRaw() json.RawMessage {
-	r.usage.DurationMs = time.Since(r.started).Milliseconds()
-	return r.usage.Raw()
 }
 func (r *serverRun) child(id string) *childAgent {
 	c := r.children[id]
@@ -210,18 +203,7 @@ func (r *serverRun) onEvent(raw json.RawMessage) error {
 		native.Payload = nil
 		ev.Data = nil
 	case "cron.fired":
-		var fired struct {
-			Origin struct {
-				JobID string `json:"jobId"`
-				Stale bool   `json:"stale"`
-			} `json:"origin"`
-		}
-		if json.Unmarshal(frame.Payload, &fired) == nil {
-			if recurring, ok := r.cronJobs[fired.Origin.JobID]; ok && (!recurring || fired.Origin.Stale) {
-				delete(r.cronJobs, fired.Origin.JobID)
-				r.cronDirty = true
-			}
-		}
+		r.cron.fired(frame.Payload)
 		r.mainEnded = false
 	case "compaction.started":
 		if !child {
@@ -244,7 +226,7 @@ func (r *serverRun) onEvent(raw json.RawMessage) error {
 	case "turn.started":
 		if !child {
 			r.mainEnded = false
-			r.usage.Turns++
+			r.usage.startTurn()
 			ev.Type = agent.EventTurnStatus
 			ev.Status = "running"
 		}
@@ -283,15 +265,9 @@ func (r *serverRun) onEvent(raw json.RawMessage) error {
 			}
 		}
 	case "turn.step.completed":
-		key := fmt.Sprintf("%s:%d:%d:%s", who, p.TurnID, p.Step, p.StepID)
-		if p.Usage != nil && !r.steps[key] {
-			r.steps[key] = true
-			r.usage.InputTokens += p.Usage.InputOther
-			r.usage.OutputTokens += p.Usage.Output
-			r.usage.CacheReadTokens += p.Usage.InputCacheRead
-			r.usage.CacheWriteTokens += p.Usage.InputCacheCreation
+		if r.usage.recordStep(who, p) {
 			ev.Type = agent.EventUsageUpdated
-			ev.Usage = r.usageRaw()
+			ev.Usage = r.usage.raw()
 		}
 	case "assistant.delta", "thinking.delta":
 		if child {
@@ -337,7 +313,7 @@ func (r *serverRun) onEvent(raw json.RawMessage) error {
 			}
 		}
 		if t != nil && !child {
-			r.cronTool(t)
+			r.cron.toolResult(t)
 		}
 		if child {
 			r.childEvent(r.child(who), native)

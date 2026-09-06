@@ -64,7 +64,7 @@ func (r *serverRun) applyPreferences(ctx context.Context, p *serverTransport) er
 	config := nativeAgentConfig{PlanMode: &planMode}
 	if model := normalizeKimiModel(r.req.Model); model != "" {
 		config.Model = model
-		r.usage.Model = model
+		r.usage.setModel(model)
 	}
 	config.Thinking = thinking
 	r.thinking = thinking

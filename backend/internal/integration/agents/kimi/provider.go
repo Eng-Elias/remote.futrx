@@ -70,7 +70,7 @@ func (p *Provider) Run(ctx context.Context, req agent.RunRequest, emit func(agen
 		}
 	}
 	if ctx.Err() != nil {
-		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usageRaw()})
+		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usage.raw()})
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil
 		}
@@ -80,13 +80,13 @@ func (p *Provider) Run(ctx context.Context, req agent.RunRequest, emit func(agen
 		return err
 	}
 	if err != nil {
-		run.publish(agent.Event{Type: agent.EventRunFailed, Message: "Kimi run failed: " + err.Error(), IsError: true, Usage: run.usageRaw()})
+		run.publish(agent.Event{Type: agent.EventRunFailed, Message: "Kimi run failed: " + err.Error(), IsError: true, Usage: run.usage.raw()})
 		return agent.ErrRunFailed
 	}
 	if run.interrupted {
-		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usageRaw()})
+		run.publish(agent.Event{Type: agent.EventRunInterrupted, Status: "interrupted", Usage: run.usage.raw()})
 		return nil
 	}
-	run.publish(agent.Event{Type: agent.EventRunCompleted, Usage: run.usageRaw()})
+	run.publish(agent.Event{Type: agent.EventRunCompleted, Usage: run.usage.raw()})
 	return nil
 }
