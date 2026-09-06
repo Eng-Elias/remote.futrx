@@ -10,6 +10,8 @@ import (
 	"io"
 	"os/exec"
 	"time"
+
+	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 )
 
 //go:embed bridge.mjs
@@ -58,10 +60,10 @@ func startServerTransport(ctx context.Context, cmd *exec.Cmd) (*serverTransport,
 		in.Close()
 		return nil, fmt.Errorf("start Kimi bridge: %w", err)
 	}
-	p := &serverTransport{cmd: cmd, stdin: in, frames: make(chan bridgeFrame, 64), done: make(chan error, 1)}
+	p := &serverTransport{cmd: cmd, stdin: in, frames: make(chan bridgeFrame, configconstants.KimiBridgeFrameQueueSize), done: make(chan error, 1)}
 	go func() {
 		scanner := bufio.NewScanner(out)
-		scanner.Buffer(make([]byte, 64<<10), 16<<20)
+		scanner.Buffer(make([]byte, configconstants.KimiBridgeScanBufferBytes), configconstants.KimiBridgeMaxFrameBytes)
 		for scanner.Scan() {
 			var frame bridgeFrame
 			if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil {
@@ -147,7 +149,7 @@ func (p *serverTransport) api(ctx context.Context, method, path string, body, re
 func (p *serverTransport) close() error {
 	var failure error
 	_ = p.stdin.Close()
-	timer := time.NewTimer(8 * time.Second)
+	timer := time.NewTimer(configconstants.KimiBridgeCloseTimeout)
 	defer timer.Stop()
 	frames := p.frames
 	killed := false
@@ -183,7 +185,7 @@ func (p *serverTransport) close() error {
 			}
 			killed = true
 			_ = p.cmd.Process.Kill()
-			timer.Reset(2 * time.Second)
+			timer.Reset(configconstants.KimiBridgeKillTimeout)
 		}
 	}
 }

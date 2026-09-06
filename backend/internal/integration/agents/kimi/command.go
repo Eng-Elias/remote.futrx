@@ -2,10 +2,12 @@ package kimi
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 
 	"github.com/futrx-com/remote.futrx.com/internal/agent"
+	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 	agentruntime "github.com/futrx-com/remote.futrx.com/internal/integration/agents/runtime"
 )
 
@@ -13,8 +15,19 @@ import (
 // kimi-code reads its OAuth credentials, config, and sessions.
 const containerKimiHome = "/root/.kimi-code"
 
-func (p *Provider) args(req agent.RunRequest) []string {
-	return []string{"--input-type=module", "-e", serverBridge}
+func bridgeArgs() []string {
+	settings, _ := json.Marshal(struct {
+		StartupTimeoutMs  int64 `json:"startupTimeoutMs"`
+		RequestTimeoutMs  int64 `json:"requestTimeoutMs"`
+		ShutdownTimeoutMs int64 `json:"shutdownTimeoutMs"`
+		StderrTailBytes   int   `json:"stderrTailBytes"`
+	}{
+		configconstants.KimiServerStartupTimeout.Milliseconds(),
+		configconstants.KimiServerRequestTimeout.Milliseconds(),
+		configconstants.KimiServerShutdownTimeout.Milliseconds(),
+		configconstants.KimiServerStderrTailBytes,
+	})
+	return []string{"--input-type=module", "-e", serverBridge + "\nstartKimiBridge(" + string(settings) + ");\n"}
 }
 
 func (p *Provider) buildCmd(

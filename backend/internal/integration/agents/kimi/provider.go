@@ -44,7 +44,7 @@ func (p *Provider) Run(ctx context.Context, req agent.RunRequest, emit func(agen
 		return fmt.Errorf("unsupported Kimi mode %q", req.Mode)
 	}
 	run := newServerRun(req, emit)
-	cmd, containerName, err := p.buildCmd(ctx, req, p.args(req), emit)
+	cmd, containerName, err := p.buildCmd(ctx, req, bridgeArgs(), emit)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ func (p *Provider) Capabilities(ctx context.Context, req agent.CapabilityRequest
 	if req.ContainerName == "" {
 		kimiHome = hostKimiHome()
 	}
-	cmd := agentruntime.NewCapabilityCommand(context.WithoutCancel(ctx), req, []string{"HOME=/root", "KIMI_CODE_HOME=" + kimiHome}, "node", "--input-type=module", "-e", serverBridge)
+	cmd := agentruntime.NewCapabilityCommand(context.WithoutCancel(ctx), req, []string{"HOME=/root", "KIMI_CODE_HOME=" + kimiHome}, "node", bridgeArgs()...)
 	transport, err := startServerTransport(ctx, cmd)
 	if err != nil {
 		caps := fallbackCapabilities()

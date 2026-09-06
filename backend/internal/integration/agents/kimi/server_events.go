@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/futrx-com/remote.futrx.com/internal/agent"
+	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 )
 
 type serverEvent struct {
@@ -112,7 +113,7 @@ func (r *serverRun) child(id string) *childAgent {
 	return c
 }
 func (r *serverRun) childEvent(c *childAgent, native *agent.NativeEnvelope) {
-	if native != nil && (native.Method == "kimi/assistant.delta" || native.Method == "kimi/thinking.delta") && time.Since(c.lastEmit) < 100*time.Millisecond {
+	if native != nil && (native.Method == "kimi/assistant.delta" || native.Method == "kimi/thinking.delta") && time.Since(c.lastEmit) < configconstants.KimiChildDeltaInterval {
 		return
 	}
 	c.lastEmit = time.Now()

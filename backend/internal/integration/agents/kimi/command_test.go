@@ -10,7 +10,7 @@ import (
 func TestCommandKeepsPromptAndModelOutOfProcessArguments(t *testing.T) {
 	p := &Provider{}
 	req := agent.RunRequest{Cwd: t.TempDir(), Prompt: "private user prompt", Model: "moonshot/kimi-k2[1m]", Mode: agent.RunModePlan}
-	cmd, _, err := p.buildCmd(context.Background(), req, p.args(req), nil)
+	cmd, _, err := p.buildCmd(context.Background(), req, bridgeArgs(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

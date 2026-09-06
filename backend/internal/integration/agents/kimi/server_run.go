@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/futrx-com/remote.futrx.com/internal/agent"
+	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 )
 
 func (r *serverRun) path() string { return "/api/v1/sessions/" + url.PathEscape(r.session) }
@@ -177,7 +178,7 @@ func (r *serverRun) execute(ctx context.Context, p *serverTransport) error {
 		return err
 	}
 
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(configconstants.KimiRunIdlePollInterval)
 	defer ticker.Stop()
 	responses := r.req.InteractionResponses
 	// Confirm idle twice so background task completion callbacks can enqueue
@@ -299,7 +300,7 @@ func (r *serverRun) abort(p *serverTransport) {
 	if r.session == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), configconstants.KimiRunAbortTimeout)
 	defer cancel()
 	_ = r.saveCron(ctx, p)
 	// Server shutdown disposes all agents too. First persist cancellations.
