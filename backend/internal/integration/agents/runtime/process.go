@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,21 +73,7 @@ func RunProcess(
 
 	stderrDone := make(chan string, 1)
 	go func() {
-		sc := bufio.NewScanner(stderr)
-		sc.Buffer(make([]byte, 0, 8192), maxBytes(opts.StderrMaxLineBytes, 1<<20))
-		var captured bytes.Buffer
-		for sc.Scan() {
-			line := sc.Text()
-			log.Printf("%s[%s] stderr: %s", name, logID, line)
-			captured.WriteString(line)
-			captured.WriteByte('\n')
-			// Errors often follow a long stream of tool progress. Retain the
-			// bounded tail so the final diagnostic survives noisy runs.
-			if excess := captured.Len() - (64 << 10); excess > 0 {
-				captured.Next(excess)
-			}
-		}
-		stderrDone <- captured.String()
+		stderrDone <- captureStderr(stderr, name, logID, opts.StderrMaxLineBytes)
 	}()
 
 	sc := bufio.NewScanner(stdout)
