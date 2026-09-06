@@ -6,8 +6,46 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/futrx-com/remote.futrx.com/internal/agent"
 	configconstants "github.com/futrx-com/remote.futrx.com/internal/config/constants"
 )
+
+type serverRun struct {
+	thinking    string
+	cron        cronTracker
+	compacting  bool
+	req         agent.RunRequest
+	emit        func(agent.Event)
+	session     string
+	mainEnded   bool
+	failure     string
+	interrupted bool
+	seq         int64
+	epoch       string
+	activity    agentActivity
+	pending     map[string]pendingInteraction
+	usage       runUsage
+}
+
+func newServerRun(req agent.RunRequest, emit func(agent.Event)) *serverRun {
+	return &serverRun{
+		req: req, emit: emit,
+		cron: newCronTracker(), activity: newAgentActivity(),
+		pending: map[string]pendingInteraction{}, usage: newRunUsage(req.Model),
+	}
+}
+func (r *serverRun) publish(ev agent.Event) {
+	ev.T = time.Now().UnixMilli()
+	ev.Provider = agent.ProviderKimi
+	ev.ConversationID = r.req.ConversationID
+	ev.SessionID = r.session
+	r.emit(ev)
+}
+func (r *serverRun) publishChild(c *childAgent, native *agent.NativeEnvelope) {
+	if ev := r.activity.collaboration(r.session, c, native); ev != nil {
+		r.publish(*ev)
+	}
+}
 
 func (r *serverRun) execute(ctx context.Context, p *serverTransport) error {
 	if err := r.openSession(ctx, p); err != nil {
@@ -131,12 +169,7 @@ func (r *serverRun) idle(ctx context.Context, p *serverTransport) (bool, error) 
 	if goal != nil && goal.Status == "active" {
 		return false, nil
 	}
-	for _, c := range r.children {
-		if c.status == "running" {
-			return false, nil
-		}
-	}
-	return true, nil
+	return !r.activity.running(), nil
 }
 
 func (r *serverRun) abort(p *serverTransport) {

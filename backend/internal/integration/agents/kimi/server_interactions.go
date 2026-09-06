@@ -81,7 +81,7 @@ func (r *serverRun) interactionEvent(kind string, raw json.RawMessage) error {
 
 func (r *serverRun) answer(ctx context.Context, p *serverTransport, response agent.InteractionResponse) error {
 	if taskID, ok := strings.CutPrefix(response.ID, "task:"+r.session+":"); ok {
-		if !r.tasks[taskID] {
+		if !r.activity.controlsTask(taskID) {
 			return nil
 		}
 		var action struct {
@@ -92,12 +92,7 @@ func (r *serverRun) answer(ctx context.Context, p *serverTransport, response age
 		}
 		err := p.api(ctx, "POST", r.path()+"/tasks/"+url.PathEscape(taskID)+":"+action.Action, map[string]any{}, nil)
 		if err == nil && action.Action == "detach" {
-			for _, c := range r.children {
-				if c.taskID == taskID {
-					c.background = true
-					r.childEvent(c, nil)
-				}
-			}
+			r.activity.detachTask(taskID, func(c *childAgent) { r.publishChild(c, nil) })
 		}
 		if e, ok := err.(*serverError); ok && e.Code == 40904 {
 			return nil

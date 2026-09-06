@@ -55,9 +55,7 @@ func (r *serverRun) submit(ctx context.Context, p *serverTransport) (bool, error
 		if side.AgentID == "" {
 			return false, fmt.Errorf("Kimi did not return a side-conversation agent")
 		}
-		c := r.child(side.AgentID)
-		c.name, c.description, c.sideConversation = "Side question", question, true
-		r.childEvent(c, nil)
+		r.publishChild(r.activity.startSideConversation(side.AgentID, question), nil)
 		r.mainEnded = true
 		body.AgentID = &side.AgentID
 		body.setText(prefix + question)

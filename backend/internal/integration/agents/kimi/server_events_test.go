@@ -25,8 +25,8 @@ func TestNestedTaskCancellationClearsRunningChildWithoutExposingParentTaskAPI(t 
 	r.session = "s"
 	emitNative(t, r, 1, false, `{"type":"subagent.spawned","subagentId":"nested","parentAgentId":"parent"}`)
 	emitNative(t, r, 2, false, `{"type":"task.started","agentId":"parent","info":{"taskId":"nested-task","agentId":"nested","status":"running"}}`)
-	c := r.children["nested"]
-	if c.status != "running" || r.taskControlID(c) != "" {
+	c := r.activity.children["nested"]
+	if c.status != "running" || r.activity.taskControlID(r.session, c) != "" {
 		t.Fatalf("nested task exposed through main API: %+v", c)
 	}
 	emitNative(t, r, 3, false, `{"type":"task.terminated","agentId":"parent","info":{"taskId":"nested-task","agentId":"nested","status":"killed"}}`)
@@ -58,7 +58,7 @@ func TestNativeEventsSeparateNestedAgentsAndCountStepUsageOnce(t *testing.T) {
 			t.Fatal("child text leaked into main transcript")
 		}
 	}
-	c := r.children["b"]
+	c := r.activity.children["b"]
 	if c.parent != "a" || c.status != "completed" || c.thinking != "child reasoning" || len(c.tools) != 1 || !c.tools[0].IsError {
 		t.Fatalf("child=%+v", c)
 	}
