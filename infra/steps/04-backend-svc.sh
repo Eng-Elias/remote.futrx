@@ -8,6 +8,7 @@
 # Expects from caller:
 #   - log / ok / err helpers
 #   - $INFRA_DIR, $INSTALL_DIR, $HOSTNAME, $SERVICE_PORT
+#   - $BROWSER_STATE_DIR, $BROWSER_SECRET_FILE
 set -euo pipefail
 
 SERVICE_NAME="remote.futrx.service"
@@ -30,13 +31,14 @@ fi
 
 # ───────────────── browser broker ─────────────────
 log "Configuring shared browser broker"
-install -d -o remote-browser -g remote-browser -m 0700 "$INSTALL_DIR/data/browser-broker"
-if [ ! -s "$INSTALL_DIR/data/browser-broker.secret" ]; then
+install -d -o remote-browser -g remote-browser -m 0700 "$BROWSER_STATE_DIR"
+install -d -o root -g remote-browser -m 0750 "$(dirname "$BROWSER_SECRET_FILE")"
+if [ ! -s "$BROWSER_SECRET_FILE" ]; then
     umask 0077
-    head -c 48 /dev/urandom | base64 > "$INSTALL_DIR/data/browser-broker.secret"
+    head -c 48 /dev/urandom | base64 > "$BROWSER_SECRET_FILE"
 fi
-chown root:remote-browser "$INSTALL_DIR/data/browser-broker.secret"
-chmod 0640 "$INSTALL_DIR/data/browser-broker.secret"
+chown root:remote-browser "$BROWSER_SECRET_FILE"
+chmod 0640 "$BROWSER_SECRET_FILE"
 render_template "${INFRA_DIR}/templates/remote.futrx-browser.service.tmpl" \
                 "$BROWSER_SERVICE_UNIT_PATH"
 systemctl daemon-reload

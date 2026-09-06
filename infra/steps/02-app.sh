@@ -7,7 +7,7 @@
 #
 # Expects from caller:
 #   - log / ok / err helpers
-#   - $INSTALL_DIR, $HOSTNAME
+#   - $INSTALL_DIR, $HOSTNAME, $BROWSER_STATE_DIR
 #   - $GOOGLE_CLIENT_ID, $GOOGLE_CLIENT_SECRET (optional)
 #
 # Sets:
@@ -38,21 +38,22 @@ if ! getent group remote-browser >/dev/null; then
     groupadd --system remote-browser
 fi
 if ! id -u remote-browser >/dev/null 2>&1; then
-    useradd --system --gid remote-browser --home-dir "$INSTALL_DIR/data/browser-broker/home" \
+    useradd --system --gid remote-browser --home-dir "$BROWSER_STATE_DIR/home" \
         --shell /usr/sbin/nologin remote-browser
 fi
+usermod --home "$BROWSER_STATE_DIR/home" remote-browser
 install -d -o remote-browser -g remote-browser -m 0700 \
-    "$INSTALL_DIR/data/browser-broker" \
-    "$INSTALL_DIR/data/browser-broker/home" \
-    "$INSTALL_DIR/data/browser-broker/browsers" \
-    "$INSTALL_DIR/data/browser-broker/contexts"
+    "$BROWSER_STATE_DIR" \
+    "$BROWSER_STATE_DIR/home" \
+    "$BROWSER_STATE_DIR/browsers" \
+    "$BROWSER_STATE_DIR/contexts"
 (
     cd browser-broker
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --silent --no-audit --no-fund 2>&1 | tail -3
     npx playwright install-deps chromium 2>&1 | tail -10
     runuser -u remote-browser -- env \
-        HOME="$INSTALL_DIR/data/browser-broker/home" \
-        PLAYWRIGHT_BROWSERS_PATH="$INSTALL_DIR/data/browser-broker/browsers" \
+        HOME="$BROWSER_STATE_DIR/home" \
+        PLAYWRIGHT_BROWSERS_PATH="$BROWSER_STATE_DIR/browsers" \
         npx playwright install chromium 2>&1 | tail -10
 )
 ok "shared browser broker dependencies installed"

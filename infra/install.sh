@@ -205,6 +205,8 @@ REPO_URL="https://github.com/futrx-com/remote.futrx.git"
 SERVICE_PORT="${SERVICE_PORT:-7682}"
 HOST_CLI_PREFIX="$INSTALL_DIR/data/host-clis"
 HOST_CLI_BIN_DIR="$HOST_CLI_PREFIX/bin"
+BROWSER_STATE_DIR="${FUTRX_BROWSER_STATE_DIR:-/var/lib/remote/browser-broker}"
+BROWSER_SECRET_FILE="${FUTRX_BROWSER_SECRET_FILE:-/etc/remote.futrx/browser-broker.secret}"
 
 # Host agent installation and the backend must resolve the same executables.
 # Use an application-owned prefix ahead of host-global locations so legacy or
@@ -216,7 +218,7 @@ PATH="$HOST_CLI_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 HOSTNAME_RE="$(printf '%s' "$HOSTNAME" | sed 's/\./\\./g')"
 
 export INFRA_DIR INSTALL_DIR LEGACY_INSTALL_DIR REPO_URL SERVICE_PORT HOSTNAME_RE
-export HOST_CLI_PREFIX HOST_CLI_BIN_DIR PATH
+export HOST_CLI_PREFIX HOST_CLI_BIN_DIR BROWSER_STATE_DIR BROWSER_SECRET_FILE PATH
 
 # ───────────────── helpers (sourced by steps) ─────────────────
 log()  { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
@@ -231,7 +233,7 @@ export -f log warn ok err
 # regex `\$` anchors) survive untouched.
 render_template() {
     local tmpl="$1" dest="$2"
-    envsubst '$HOSTNAME $HOSTNAME_RE $INSTALL_DIR $SERVICE_PORT $LXD_BRIDGE_IP $LXD_BRIDGE $HOST_CLI_BIN_DIR' \
+    envsubst '$HOSTNAME $HOSTNAME_RE $INSTALL_DIR $SERVICE_PORT $LXD_BRIDGE_IP $LXD_BRIDGE $HOST_CLI_BIN_DIR $BROWSER_STATE_DIR $BROWSER_SECRET_FILE' \
         < "$tmpl" > "$dest"
 }
 export -f render_template

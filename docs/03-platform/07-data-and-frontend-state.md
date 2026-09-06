@@ -32,6 +32,13 @@ The application does not use a database. Durable metadata is stored as JSON file
     ├── claude/                          mounted at /root/.claude
     ├── kimi/                            mounted at /root/.kimi-code
     └── antigravity/                     mounted at /root/.gemini/antigravity-cli
+
+/var/lib/remote/browser-broker/
+├── browsers/                            one host Chromium installation
+├── home/                                unprivileged broker home
+└── contexts/<sha256-project>/           encrypted web-session state
+
+/etc/remote.futrx/browser-broker.secret  root-owned broker signing/encryption key
 ```
 
 The host-wide credential sources use provider-owned paths in the host user's home. Credential synchronizers seed or update project-specific credential locations, primarily the mounted provider homes. Claude also requires `/root/.claude.json` outside its mounted home; that file survives replacement through host synchronization rather than the project mount.
@@ -140,6 +147,9 @@ Project metadata and workspaces are separate:
   only when starting MiniMax.
 - `/var/lib/remote/projects/<slug>/agent-home/antigravity` stores durable
   Antigravity state and is mounted at `/root/.gemini/antigravity-cli`.
+- `/var/lib/remote/browser-broker/contexts` stores each project's encrypted
+  cookies, local storage, and IndexedDB state. The key under
+  `/etc/remote.futrx` must be backed up with it.
 - Access and secrets use separate mode-`0600` files.
 - Metadata writes use a temporary file and rename where implemented.
 

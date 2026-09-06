@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -115,7 +114,7 @@ func Load() Config {
 		},
 		Browser: BrowserOptions{
 			BrokerURL:        strings.TrimSpace(os.Getenv("BROWSER_BROKER_URL")),
-			BrokerSecretFile: envDefault("BROWSER_BROKER_SECRET_FILE", filepath.Join(dataDir, "browser-broker.secret")),
+			BrokerSecretFile: envDefault("BROWSER_BROKER_SECRET_FILE", "/etc/remote.futrx/browser-broker.secret"),
 		},
 	}
 }
