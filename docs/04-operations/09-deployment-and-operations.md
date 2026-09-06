@@ -43,6 +43,11 @@ one convergence cannot mix policy from two commits.
 | Main application PWA | Installable chat/control surface, Web Push, and a network-failure offline page |
 | code-server launcher PWA | One installable entry point for project IDEs |
 
+The browser broker is bounded to 32 simultaneous project contexts, a 3 GiB
+hard memory ceiling, and 1,024 tasks. The task allowance is sized for
+Chromium's renderer/thread model at the context ceiling; it is not an
+unbounded process allowance.
+
 ## Build flow
 
 ```mermaid
