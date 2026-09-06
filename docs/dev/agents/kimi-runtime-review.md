@@ -54,6 +54,39 @@ cannot enforce. Kimi CLI utilities and native settings interfaces (doctor,
 export, migration, visualizer, plugin/provider/MCP account management) retain
 normal CLI behavior; this adapter is not a reproduction of every TUI screen.
 
+## Implementation ownership
+
+The provider prepares the execution scope and collects credentials. The run
+coordinates the protocol through explicit owners:
+
+| Responsibility | Owner |
+| --- | --- |
+| Bridge startup and resource limits | `bridge.mjs` exports `startKimiBridge`; `command.go` injects `config/constants/kimi.go` values. Importing the bridge does not start Kimi. |
+| Process lifecycle and terminal result | `server_process.go` starts, aborts, drains and closes the transport before outcome publication. Shared line-based providers use `runtime/stderr.go` for bounded diagnostic capture. |
+| Session identity and configuration | `server_session.go`, `server_preferences.go`, and `browser_mcp.go` establish identity, translate composer preferences and prepare the dedicated MCP entry. `server_requests.go` owns private native request DTOs, including explicit omitted/empty/false distinctions. |
+| Event routing | `server_events.go` handles session/replay filtering and routes native events. `server_protocol.go` contains the private event decoder shapes. |
+| Delegated activity | `server_activity.go` owns agent ancestry, tool correlation, child transcript state, task ownership, terminal reconciliation and collaboration projections. |
+| Usage and scheduled lifetime | `server_usage.go` owns per-step deduplication and totals; `server_cron.go` owns tracked cron jobs and metadata persistence. |
+| Interactions | `server_interaction_requests.go` owns pending IDs and public projections; `server_answers.go` validates replies without I/O; `server_interactions.go` and `server_task_controls.go` perform native operations and resolve acknowledged requests. |
+| Model declarations | `model_traits.go` maps native thinking/modality declarations; `capability_parser.go` retains catalog shape, alias and override compatibility. |
+| Chat forms and controls | `questionAnswerState.ts` owns component-local answer transitions, exposed through `useQuestionForm`. UI emits typed intents; `chatInteractionService` encodes native replies. Delegated control targets reach the card through `useDelegatedAgentControls`. |
+
+The refactor preserves native request ordering, error messages, event ordering,
+replay handling, idle polling, child-delta throttling, private-answer filtering,
+and the existing form keys, labels and selection semantics. Registration,
+provisioning contracts, shared event models and prompt enrichment remain in
+their existing layers.
+
+## Separate follow-up found during refactoring
+
+`server_commands.go` uses a literal space to separate a slash command from its
+arguments, while the preference preflight's `userCommand()` uses whitespace
+fields. Consequently `/agent<TAB>profile` skips normal profile preferences but
+is submitted as ordinary prompt text. Use the documented space syntax. This
+inconsistency was left for a separate behavior change; it is not silently fixed
+by the structural refactor. Rapid repeated option clicks sharing a render also
+retain their existing selection semantics, covered by the local state test.
+
 ## The 307 report
 
 The installed CLI is exercised through the actual adapter against a loopback
@@ -85,8 +118,13 @@ resume/fork, Plan alternative approval, isolated side questions, goals, custom p
 browser MCP with a fake MCP server. Deterministic protocol tests additionally
 cover nested correlation, duplicate usage, plan feedback, stale answers,
 recovery boundaries, background completion and cron lifetime bookkeeping.
-All 245 frontend tests pass, including capability selection/approval separation
-and response encoding; the production build checks the question/plan/child controls.
+All 250 frontend tests pass, including capability selection/approval separation
+and response encoding. The production build and browser checks cover question
+selection/other text, secret-input trimming, dismissal, plan feedback/choices,
+and delegated stop/background controls. The browser checks were also run against
+the original question form before comparing the extracted state implementation.
+`go vet ./...`, `go build ./...`, and the race tests (including shared runtime)
+pass after the refactor.
 
 This is host and container-command validation, not a deployed QA LXC run with a
 live subscription. Authentication presence checks do not prove account
