@@ -23,7 +23,9 @@ export interface ChatInteractionQuestion {
   id?: string;
   header?: string;
   question?: string;
-  options?: Array<{ label?: string; description?: string }>;
+  body?: string;
+  multiSelect?: boolean;
+  options?: Array<{ id?: string; label?: string; description?: string }>;
   isOther?: boolean;
   isSecret?: boolean;
 }

@@ -14,16 +14,7 @@ import (
 const containerKimiHome = "/root/.kimi-code"
 
 func (p *Provider) args(req agent.RunRequest) []string {
-	// kimi-code takes the prompt as the -p option's value (not stdin). Print
-	// mode (`-p`) supplies the provider's normal non-interactive behavior.
-	args := []string{"-p", req.Prompt, "--output-format", "stream-json"}
-	if model := normalizeKimiModel(req.Model); model != "" {
-		args = append(args, "--model", model)
-	}
-	if req.ResumeID != "" {
-		args = append(args, "--session", req.ResumeID)
-	}
-	return args
+	return []string{"--input-type=module", "-e", serverBridge}
 }
 
 func (p *Provider) buildCmd(
@@ -41,7 +32,7 @@ func (p *Provider) buildCmd(
 	}
 
 	if req.ProjectID == "" || p.projectPreparer == nil {
-		cmd := exec.CommandContext(ctx, "kimi", args...)
+		cmd := exec.CommandContext(context.WithoutCancel(ctx), "node", args...)
 		cmd.Dir = cwd
 		cmd.Env = append(os.Environ(), "KIMI_CODE_HOME="+hostKimiHome())
 		cmd.Env = agent.WithRuntimeEnvironment(cmd.Env, req.RuntimeEnv)
@@ -57,12 +48,12 @@ func (p *Provider) buildCmd(
 	if err != nil {
 		return nil, "", err
 	}
-	cmd := agentruntime.BuildContainerCommand(ctx, agentruntime.ContainerCommandSpec{
+	cmd := agentruntime.BuildContainerCommand(context.WithoutCancel(ctx), agentruntime.ContainerCommandSpec{
 		ContainerName:      project.ContainerName,
 		PrefixEnvironment:  []string{"HOME=/root", "KIMI_CODE_HOME=" + containerKimiHome},
 		Secrets:            project.Secrets,
 		RuntimeEnvironment: req.RuntimeEnv,
-		Binary:             p.profile.CLI.Binary,
+		Binary:             "node",
 		Arguments:          args,
 	})
 	return cmd, project.ContainerName, nil

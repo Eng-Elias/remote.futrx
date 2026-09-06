@@ -33,15 +33,17 @@ func TestParseCapabilitiesFromProviderJSON(t *testing.T) {
 	if caps.Models[1].Label != "Kimi K2.5" || !caps.Models[1].ProviderDefault {
 		t.Fatalf("fast model = %+v", caps.Models[1])
 	}
-	for _, model := range caps.Models {
-		if len(model.ReasoningEfforts) != 0 || model.DefaultReasoningEffort != "" {
-			t.Fatalf("unsupported thinking control advertised: %+v", model)
-		}
+	if len(caps.Models[1].ReasoningEfforts) != 5 || caps.Models[1].DefaultReasoningEffort != "medium" {
+		t.Fatalf("efforts = %+v", caps.Models[1])
 	}
+	if len(caps.ApprovalPolicies) != 3 {
+		t.Fatalf("approvals = %+v", caps.ApprovalPolicies)
+	}
+
 	if caps.Models[2].Label != "Kimi K2 0711 Preview" || caps.Models[2].Description != "Provider model: kimi-k2-0711-preview" {
 		t.Fatalf("versioned model = %+v", caps.Models[2])
 	}
-	if len(caps.Modes) != 1 || caps.Modes[0].Value != string(agent.RunModeDefault) {
+	if len(caps.Modes) != 2 || caps.Modes[0].Value != string(agent.RunModeDefault) {
 		t.Fatalf("modes = %+v", caps.Modes)
 	}
 }

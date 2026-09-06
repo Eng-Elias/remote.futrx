@@ -1,3 +1,4 @@
+import type { ChatInteractionResponder } from "../../../types/chatApi";
 import type { AssistantMessagePart } from "../../../models/chatMessage";
 import { useState } from "preact/hooks";
 import { ChevronDown, ChevronRight } from "../../primitives/icons";
@@ -21,10 +22,12 @@ export function CollaborationCard({
   part,
   chatId,
   cwd,
+  onRespond,
 }: {
   part: CollaborationPart;
   chatId?: string;
   cwd?: string;
+  onRespond?: ChatInteractionResponder;
 }) {
   const states = isObject(part.data.agentsStates) ? part.data.agentsStates : {};
   const isSubagentThread = part.data.type === "subagentThread";
@@ -70,6 +73,32 @@ export function CollaborationCard({
         {typeof part.data.prompt === "string" && (
           <p class="text-[12px] leading-relaxed text-ink-300">{part.data.prompt}</p>
         )}
+        {typeof part.data.stopInteractionId === "string" && part.data.stopInteractionId && onRespond && !isTerminalStatus(status) && (
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="rounded-control border border-line px-2 py-1 text-[11px] text-accent-red"
+              onClick={() => onRespond(part.data.stopInteractionId as string, "kimi/task", { kind: "submit_provider_result", result: { action: "cancel" } })}
+            >
+              Stop agent
+            </button>
+            {part.data.runInBackground !== true && (
+              <button
+                type="button"
+                class="rounded-control border border-line px-2 py-1 text-[11px] text-ink-200"
+                onClick={() => onRespond(part.data.stopInteractionId as string, "kimi/task", { kind: "submit_provider_result", result: { action: "detach" } })}
+              >
+                Run in background
+              </button>
+            )}
+          </div>
+        )}
+        {typeof part.data.reasoning === "string" && part.data.reasoning && (
+          <details class="text-[12px] text-ink-400">
+            <summary class="cursor-pointer">Agent reasoning</summary>
+            <Markdown chatId={chatId} cwd={cwd}>{part.data.reasoning}</Markdown>
+          </details>
+        )}
         {isSubagentThread && tools.length > 0 && (
           <SubagentTools
             tools={tools}
@@ -94,7 +123,7 @@ export function CollaborationCard({
               )}
               {isSubagentThread && !(typeof state.message === "string" && state.message) && (
                 <div class="mt-2 text-[11px] text-ink-400">
-                  {status === "inProgress" || status === "idle" ? "Working…" : "No final report was provided."}
+                  {status === "inProgress" || status === "running" || status === "waiting" || status === "idle" ? "Working…" : "No final report was provided."}
                 </div>
               )}
             </div>

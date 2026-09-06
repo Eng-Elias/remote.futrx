@@ -18,12 +18,13 @@ func parseProviderCatalog(raw []byte, defaults string) (agent.Capabilities, erro
 		return agent.Capabilities{}, err
 	}
 	return agent.Capabilities{
-		Provider:    agent.ProviderKimi,
-		Label:       "Kimi",
-		Source:      agent.CapabilitySourceLive,
-		Models:      agent.WithAutoModel(models, "Kimi default"),
-		Modes:       agent.ProviderModes(false),
-		DefaultMode: agent.RunModeDefault,
+		Provider:         agent.ProviderKimi,
+		Label:            "Kimi",
+		Source:           agent.CapabilitySourceLive,
+		Models:           agent.WithAutoModel(models, "Kimi default"),
+		Modes:            agent.ProviderModes(true),
+		DefaultMode:      agent.RunModeDefault,
+		ApprovalPolicies: kimiApprovalPolicies(),
 	}, nil
 }
 
@@ -104,6 +105,14 @@ func parseModel(
 		return rawString(object, keys...)
 	}
 
+	values := func(keys ...string) []string {
+		if result, ok := rawStringList(overrides, keys...); ok {
+			return result
+		}
+		result, _ := rawStringList(object, keys...)
+		return result
+	}
+
 	providerModel := strings.TrimSpace(value("model"))
 	displayName := value("display_name", "displayName")
 	if displayName == "" {
@@ -122,14 +131,67 @@ func parseModel(
 		}
 	}
 
-	// Prompt mode cannot apply the selected effort to every configured model.
-	// Do not advertise a per-run control that would silently use the default.
-	return agent.ModelCapability{
-		ID:              alias,
-		Label:           displayName,
-		Description:     description,
-		ProviderDefault: alias == globalDefault,
+	caps := values("capabilities")
+	alwaysThinking := false
+	canThink := false
+	modalities := []string{"text"}
+	for _, capability := range caps {
+		switch capability {
+		case "thinking":
+			canThink = true
+		case "always_thinking":
+			canThink = true
+			alwaysThinking = true
+		case "image_in":
+			modalities = append(modalities, "image")
+		case "video_in":
+			modalities = append(modalities, "video")
+		case "audio_in":
+			modalities = append(modalities, "audio")
+		}
 	}
+	efforts := values("support_efforts", "supportEfforts")
+	reasoning := []agent.CapabilityOption{}
+	if len(efforts) > 0 || canThink {
+		reasoning = append(reasoning, agent.AutoOption())
+		if !alwaysThinking {
+			reasoning = append(reasoning, agent.CapabilityOption{Value: "off", Label: "Off"})
+		}
+		if len(efforts) == 0 {
+			efforts = []string{"on"}
+		}
+		for _, effort := range efforts {
+			effort = agent.NormalizeCapabilityValue(effort)
+			if effort != "" && !hasCapabilityOption(reasoning, effort) {
+				reasoning = append(reasoning, agent.CapabilityOption{Value: effort, Label: capabilityLabel(effort)})
+			}
+		}
+	}
+	defaultEffort := agent.NormalizeCapabilityValue(value("default_effort", "defaultEffort"))
+	if !hasCapabilityOption(reasoning, defaultEffort) {
+		defaultEffort = ""
+	}
+	return agent.ModelCapability{
+		ID:                     alias,
+		Label:                  displayName,
+		Description:            description,
+		ProviderDefault:        alias == globalDefault,
+		ReasoningEfforts:       reasoning,
+		DefaultReasoningEffort: defaultEffort,
+		InputModalities:        modalities,
+	}
+}
+
+func hasCapabilityOption(options []agent.CapabilityOption, value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, option := range options {
+		if option.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func rawString(object rawObject, keys ...string) string {
@@ -170,4 +232,34 @@ func normalizeKimiModel(value string) string {
 		}
 	}
 	return value
+}
+
+func rawStringList(object rawObject, keys ...string) ([]string, bool) {
+	for _, key := range keys {
+		raw := object[key]
+		if len(raw) == 0 {
+			continue
+		}
+		var values []string
+		if json.Unmarshal(raw, &values) == nil {
+			return values, true
+		}
+	}
+	return nil, false
+}
+
+func capabilityLabel(value string) string {
+	if strings.EqualFold(value, "xhigh") {
+		return "XHigh"
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '-' || r == '_' })
+	for index, part := range parts {
+		if part != "" {
+			parts[index] = strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	if len(parts) == 0 {
+		return value
+	}
+	return strings.Join(parts, " ")
 }
