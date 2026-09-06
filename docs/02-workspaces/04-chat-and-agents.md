@@ -156,9 +156,9 @@ their known native Default and Plan modes:
 
 The selector is hidden when Default is the provider's only available mode.
 Codex and MiniMax modes are sent through app-server collaboration modes. Claude and
-Antigravity receive their native Plan CLI flag. Kimi exposes Default only:
-its CLI rejects `--plan` together with the prompt mode Remote requires. The
-adapter rejects previously saved Plan requests before launching the CLI.
+Antigravity receive their native Plan CLI flag. Kimi applies native session
+Plan mode and routes plan review, alternatives, revision feedback, and approval
+responses through its private server API.
 
 Model, reasoning, and speed controls are stored per chat. The user's last
 selection also becomes the default for new chats. Codex forwards service tiers
@@ -196,7 +196,7 @@ or partially resolved labels and controls.
 | Codex | Every page of app-server `model/list` plus `collaborationMode/list`, with `codex debug models` as a structured fallback |
 | MiniMax | Remote's provider-owned `MiniMax-M3` catalog, consumed by the Codex app-server harness at launch |
 | Claude | The `/model` selection list, with each alias resolved through the CLI to a versioned label; `/effort` is queried in parallel, with `--help` as its fallback; native Default/Plan and eligible Auto/Opus Fast controls are declared by the adapter |
-| Kimi | Configured aliases and display/provider models from `kimi provider list --json`; the plain listing supplies the active default. Only Default mode is exposed, without a Thinking control |
+| Kimi | Native server model catalog and configured default, including supported Thinking controls, Plan mode, and native approval choices |
 | Antigravity | Display names from `agy models`; effort and mode choices from `agy --help` |
 
 The normalized model record owns its reasoning-effort and service-tier lists,
@@ -217,9 +217,9 @@ but cannot currently run; this is separate from partial-discovery warnings.
 The catalog uses the registered provider's ID and the descriptor's label as
 authoritative rather than trusting CLI output for identity.
 
-Kimi's capability response omits per-model effort controls and Plan mode,
-which the current prompt runner cannot honor. Thinking relies on the chosen
-Kimi model/configuration default.
+Kimi applies the advertised model, Thinking, and Plan preferences through native
+session settings. Auto resolves configured/model defaults. Native approval
+choices are available without advertising an OS sandbox.
 
 ### Capability cache and refresh
 

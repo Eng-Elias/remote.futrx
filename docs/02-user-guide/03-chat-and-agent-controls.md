@@ -100,9 +100,9 @@ after changing a provider's configuration in the terminal.
 It is hidden when that provider/model does not advertise an effort control.
 Claude, Codex, MiniMax, and Antigravity forward supported selections. MiniMax
 uses a binary thinking switch: **Think-Off** sends `none`, while **Adaptive**
-and Auto enable Adaptive Thinking at the documented `high` setting. Kimi's
-Thinking control is hidden; its prompt runner uses the configured model/default
-effort.
+and Auto enable Adaptive Thinking at the documented `high` setting. Kimi applies
+the selected native effort and streams reasoning; Auto resolves its configured
+model/default effort.
 
 **Auto** omits the explicit effort flag. The provider or model then chooses its
 default. Higher labels request more reasoning; they can increase latency and
@@ -134,10 +134,10 @@ MiniMax apply native Codex-harness Plan collaboration instructions.
 Changing **Mode** while a run is already active affects a later prompt, not the
 provider process that is currently producing output.
 
-Kimi exposes Default mode only. Its CLI rejects `--plan` together with the
-non-interactive prompt mode Remote uses. If an older chat still has Plan saved,
-select Default before retrying; the backend rejects unsupported modes before
-launching Kimi.
+Kimi uses native session Plan mode, including plan review, alternative selection,
+revision feedback, rejection, and cancellation. Its Approvals selector offers
+Manual, Ask when needed, and Never ask independently of OS sandbox controls.
+Use `/kimi help` for native chat commands and agent controls.
 
 ## Select skills
 

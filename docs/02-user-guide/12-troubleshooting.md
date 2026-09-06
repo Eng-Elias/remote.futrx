@@ -129,12 +129,12 @@ Runs execute under the current backend process and cannot be reattached after it
 
 ### Kimi behaves differently from Claude, Codex, or MiniMax
 
-Kimi currently has no usage telemetry, its fork starts fresh, and it does not
-receive the equivalent Browser MCP plumbing. Selected skills are injected as
-instructions to read their canonical `SKILL.md` paths rather than as native
-provider triggers.
+Kimi uses a private native server for usage, resume/fork, delegation, interactive
+approvals, Plan reviews, and Browser MCP. Selected skills are injected as
+canonical `SKILL.md` instructions; `/skill:<name>` activates native Kimi skills.
+Use `/kimi help` for side questions, goals, custom agents, and context controls.
 
-Kimi run errors include the CLI's diagnostic after the exit status. For a
+Kimi run errors preserve the native provider or transport diagnostic. For a
 missing model, follow the diagnostic's sign-in/configuration instructions.
 Missing sessions recover automatically using the visible chat history. Other
 errors are preserved without automatically replaying a partially executed task.

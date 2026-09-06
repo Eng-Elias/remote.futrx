@@ -161,7 +161,7 @@ Factories express only real policy differences:
 | Claude | Seed from its profile | Best effort | Best effort | Required when Browser is enabled |
 | Codex | Reject host API-key auth, then seed | Fatal | Best effort | Required when Browser is enabled |
 | MiniMax | Require the host-managed Token Plan subscription key before preparation | Fatal | Best effort | Required when Browser is enabled |
-| Kimi | Seed/synchronize its dynamic directory | Best effort | Best effort | Not used |
+| Kimi | Synchronize its dynamic directory; no launch seed | Best effort | Best effort | Required when Browser is enabled |
 | Antigravity | None | Best effort | Not used | Not used |
 
 Failures to list project secrets are currently ignored and the run continues
