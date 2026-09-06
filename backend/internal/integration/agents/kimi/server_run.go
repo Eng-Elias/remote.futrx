@@ -11,27 +11,27 @@ import (
 )
 
 type serverRun struct {
-	thinking    string
-	cron        cronTracker
-	compacting  bool
-	req         agent.RunRequest
-	emit        func(agent.Event)
-	session     string
-	mainEnded   bool
-	failure     string
-	interrupted bool
-	seq         int64
-	epoch       string
-	activity    agentActivity
-	pending     map[string]pendingInteraction
-	usage       runUsage
+	thinking     string
+	cron         cronTracker
+	compacting   bool
+	req          agent.RunRequest
+	emit         func(agent.Event)
+	session      string
+	mainEnded    bool
+	failure      string
+	interrupted  bool
+	seq          int64
+	epoch        string
+	activity     agentActivity
+	interactions interactionRequests
+	usage        runUsage
 }
 
 func newServerRun(req agent.RunRequest, emit func(agent.Event)) *serverRun {
 	return &serverRun{
 		req: req, emit: emit,
 		cron: newCronTracker(), activity: newAgentActivity(),
-		pending: map[string]pendingInteraction{}, usage: newRunUsage(req.Model),
+		interactions: newInteractionRequests(), usage: newRunUsage(req.Model),
 	}
 }
 func (r *serverRun) publish(ev agent.Event) {
@@ -98,7 +98,7 @@ func (r *serverRun) execute(ctx context.Context, p *serverTransport) error {
 				return err
 			}
 		case <-ticker.C:
-			if r.compacting || !r.mainEnded || len(r.pending) > 0 {
+			if r.compacting || !r.mainEnded || r.interactions.active() {
 				idleCount = 0
 				continue
 			}
@@ -112,7 +112,7 @@ func (r *serverRun) execute(ctx context.Context, p *serverTransport) error {
 			if r.interrupted {
 				return nil
 			}
-			if !idle || !r.mainEnded || len(r.pending) > 0 {
+			if !idle || !r.mainEnded || r.interactions.active() {
 				idleCount = 0
 				continue
 			}

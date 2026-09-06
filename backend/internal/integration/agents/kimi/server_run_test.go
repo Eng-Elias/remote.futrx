@@ -127,7 +127,7 @@ func TestNativeAnswersPreserveQuestionIDsMultipleChoicesAndOther(t *testing.T) {
 func TestNativeDismissQuestionAcceptsDismissedResponse(t *testing.T) {
 	r := newServerRun(agent.RunRequest{}, func(agent.Event) {})
 	r.session = "s"
-	r.pending["question:q"] = pendingInteraction{kind: "question", id: "q"}
+	r.interactions.pending["question:q"] = pendingInteraction{kind: "question", id: "q"}
 	p := fixtureTransport(t, func(req map[string]any) (any, int) {
 		if req["path"] != "/api/v1/sessions/s/questions/q:dismiss" {
 			t.Error(req["path"])
@@ -194,7 +194,7 @@ func TestNativeCommandsUseCurrentUserInputAndPreserveEnrichment(t *testing.T) {
 func TestNativePlanApprovalCarriesScopeSelectionAndFeedback(t *testing.T) {
 	r := newServerRun(agent.RunRequest{}, func(agent.Event) {})
 	r.session = "s"
-	r.pending["approval:a"] = pendingInteraction{kind: "approval", id: "a"}
+	r.interactions.pending["approval:a"] = pendingInteraction{kind: "approval", id: "a"}
 	p := fixtureTransport(t, func(req map[string]any) (any, int) {
 		body := req["body"].(map[string]any)
 		if body["decision"] != "approved" || body["scope"] != "session" || body["selected_label"] != "Option B" || body["feedback"] != "Keep the API compatible" {

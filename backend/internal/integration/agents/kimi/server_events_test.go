@@ -77,7 +77,7 @@ func TestNativeFailureAndPrivateInteractionResolution(t *testing.T) {
 	if strings.Contains(string(raw), "SECRET_ANSWER") {
 		t.Fatal("private response persisted")
 	}
-	if len(r.pending) != 0 {
+	if len(r.interactions.pending) != 0 {
 		t.Fatal("resolved request remains pending")
 	}
 }
