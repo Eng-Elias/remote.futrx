@@ -130,7 +130,8 @@ whole-catalog timeout.
 | GET | `/api/projects/{id}/agent-browser` | Get Agent Browser core/view status and record activity |
 | POST | `/api/projects/{id}/agent-browser/start` | Ensure Agent Browser is starting or ready |
 | DELETE | `/api/projects/{id}/agent-browser` | Stop the complete Agent Browser |
-| DELETE | `/api/projects/{id}/agent-browser?scope=view` | Stop only the noVNC view |
+| GET (WebSocket) | `/api/projects/{id}/agent-browser/view` | Proxy the authenticated project screencast and input channel |
+| DELETE | `/api/projects/{id}/agent-browser?scope=view` | Stop only the human screencast view |
 | GET | `/api/projects/{id}/secrets` | List project secrets |
 | PUT, DELETE | `/api/projects/{id}/secrets/{key}` | Set or delete one secret |
 | GET, POST | `/api/projects/{id}/access` | List members or add a registered email |

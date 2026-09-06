@@ -14,7 +14,7 @@ import (
 )
 
 func (p *Provider) args(req agent.RunRequest) []string {
-	return codexharness.AppServerArgs(nil, req.EnableBrowser)
+	return codexharness.AppServerArgs(nil, req.EnableBrowser && req.ProjectID == "")
 }
 
 func (p *Provider) buildCmd(
@@ -52,13 +52,16 @@ func (p *Provider) buildCmd(
 	if err != nil {
 		return nil, "", err
 	}
+	if req.EnableBrowser {
+		args = codexharness.WithBrowserConnection(args, project.Browser)
+	}
 	cmd := agentruntime.BuildContainerCommand(context.WithoutCancel(ctx), agentruntime.ContainerCommandSpec{
 		ContainerName:      project.ContainerName,
 		PrefixEnvironment:  []string{"HOME=/root", "CODEX_HOME=/root/.codex"},
 		Secrets:            project.Secrets,
 		ExcludedSecrets:    []string{"OPENAI_API_KEY"},
 		SuffixEnvironment:  []string{"OPENAI_API_KEY="},
-		RuntimeEnvironment: req.RuntimeEnv,
+		RuntimeEnvironment: agent.WithBrowserEnvironment(req.RuntimeEnv, project.Browser),
 		Binary:             p.profile.CLI.Binary,
 		Arguments:          args,
 	})

@@ -23,17 +23,19 @@ flowchart LR
     Host --> Git["Git CLI"]
     Host --> Tmux["tmux and PTY"]
     Host --> Info["Host resource collector"]
+    Host --> BrowserBroker["Shared browser broker"]
 
     LXD --> P1["Project container A"]
     LXD --> P2["Project container B"]
     P1 --> Agent["Agent CLI"]
     P1 --> IDE["code-server"]
     P1 --> Apps["Project web apps"]
-    P1 --> Chromium["Agent Browser"]
+    P1 -->|"scoped HTTP MCP"| BrowserContext["Project BrowserContext"]
+    BrowserContext --> BrowserBroker
 
     Caddy -->|"*.code host"| IDE
     Caddy -->|"slug--port.dev host"| Apps
-    Caddy -->|"slug--6080.dev host"| Chromium
+    Go -->|"authenticated view WebSocket"| BrowserBroker
 ```
 
 ## Application layers

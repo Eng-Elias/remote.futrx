@@ -213,8 +213,8 @@ type ContainerApp struct {
 }
 
 // AgentBrowserInfo is the externally visible state of the per-project Agent
-// Browser stack. Core is the agent-facing headed Chromium/CDP layer; view is
-// the human-facing noVNC layer.
+// Browser runtime. Core is the agent-facing Chromium layer; view is the
+// human-facing stream (or the legacy noVNC layer).
 type AgentBrowserInfo struct {
 	Status       AgentBrowserStatus `json:"status"`
 	Core         string             `json:"core,omitempty"`
@@ -226,4 +226,11 @@ type AgentBrowserInfo struct {
 	Port         int                `json:"port,omitempty"`
 	URL          string             `json:"url,omitempty"`
 	Error        string             `json:"error,omitempty"`
+}
+
+// AgentBrowserViewTarget is an internal-only upstream for the authenticated
+// browser WebSocket proxy. It must never be serialized to the frontend.
+type AgentBrowserViewTarget struct {
+	URL         string
+	BearerToken string
 }

@@ -22,6 +22,7 @@ flowchart TB
     subgraph Host["Single host (Ubuntu/Debian, runs as root)"]
         Caddy["Caddy — public HTTPS edge<br/>on-demand TLS, forward_auth, cookie stripping"]
         Go["Go backend — 127.0.0.1:7682<br/>embedded Preact SPA + REST + WebSockets"]
+        Browser["Browser broker — LXD bridge :9323<br/>one sandboxed Chromium + project contexts"]
         Stores["Stores under DATA_DIR<br/>JSON metadata + JSONL chat logs<br/>derived SQLite chat index"]
         LXD["LXD daemon"]
 
@@ -29,7 +30,6 @@ flowchart TB
             AgentA["Agent CLI (root, skip-permissions)"]
             IDEA["code-server :8842 (auth: none)"]
             AppA["Project dev servers"]
-            BrowA["Agent Browser — Chromium + noVNC :6080"]
         end
         subgraph C2["Project container B ..."]
         end
@@ -39,12 +39,13 @@ flowchart TB
     Caddy -->|"main host → loopback"| Go
     Caddy -->|"&lt;slug&gt;.code.host → :8842"| IDEA
     Caddy -->|"&lt;slug&gt;--&lt;port&gt;.dev.host → :port"| AppA
-    Caddy -->|"&lt;slug&gt;--6080.dev.host → :6080"| BrowA
     Go -->|reads/writes| Stores
+    Go -->|"authenticated view proxy"| Browser
     Go -->|lxc CLI| LXD
     LXD --> C1
     LXD --> C2
     Go -.->|"bind mounts /workspace, agent homes"| C1
+    AgentA -->|"project-scoped HTTP MCP"| Browser
 ```
 
 **Key facts about the topology:**
@@ -52,7 +53,8 @@ flowchart TB
 - The Go backend is **one process, bound to loopback** (`HOST=127.0.0.1:7682`, [`backend/internal/config/config.go`](backend/internal/config/config.go)). Caddy is the only thing listening on the public interface.
 - The backend runs as **root** ([`infra/templates/remote.futrx.service.tmpl`](infra/templates/remote.futrx.service.tmpl), `User=root`) because it drives the `lxc` CLI and chowns workspace files into the container idmap. This is a deliberate design choice with security consequences — see the [threat model](docs/threat-model.md).
 - There is **no external database service.** Authoritative platform state is flat files under `DATA_DIR` (`/opt/remote.futrx/data`): JSON for auth/users/projects/access/secrets and append-only JSONL for chat event logs. A disposable embedded SQLite database persists chat event offsets and transcript-turn ranges for bounded reads, validating them against JSONL file metadata and a prefix fingerprint before extending them. Concurrency is guarded by in-process mutexes only.
-- Each project is **one unprivileged LXD container** built from a shared base image (`futrx-remote-dev-base`: Ubuntu 24.04 + Node 22 + pinned agent CLIs + Chromium + code-server). Durable state lives on the host and is bind-mounted in.
+- Each project is **one unprivileged LXD container** built from a shared base image (`futrx-remote-dev-base`: Ubuntu 24.04 + Node 22 + pinned agent CLIs + code-server, with legacy browser packages retained for rollback). Durable state lives on the host and is bind-mounted in.
+- Agent Browser uses **one host Chromium process tree** and one isolated Playwright `BrowserContext` per active project. Cookies, local storage, IndexedDB, tabs, downloads, and MCP sessions are project-scoped; encrypted storage state survives context and container restarts.
 
 ## The four public host classes
 
@@ -63,7 +65,7 @@ Caddy ([`infra/templates/Caddyfile.tmpl`](infra/templates/Caddyfile.tmpl)) termi
 | `remote.example.com` (main) | Go backend on loopback | App session middleware; `/internal/*` blocked externally |
 | `code.<host>` and `<slug>.code.<host>` | code-server IDE in container on `:8842` | `forward_auth` → `/auth/verify` (**registered user only — no project membership check**) |
 | `<slug>--<port>.dev.<host>` | Project dev server on `<slug>.lxd:<port>` | `forward_auth` → `/auth/verify` (**project membership enforced**, or a valid public share link for that exact slug+port) |
-| `<slug>--6080.dev.<host>` | Agent Browser noVNC on `:6080` | `forward_auth` → `/auth/verify` (project membership, via the dev pattern) |
+| `<slug>--6080.dev.<host>` | Legacy Agent Browser fallback only | `forward_auth` → `/auth/verify` (project membership, via the dev pattern) |
 
 Two properties of this table are load-bearing and both are analyzed in the threat model:
 
@@ -254,7 +256,7 @@ Containers are **cattle**; durable state lives on the host and is bind-mounted i
   whole `.gemini` tree. Host dirs are chowned to uid/gid `1000000` (the
   unprivileged-root idmap) via `os.OpenRoot`+`Lchown` to defeat symlink-swap
   races.
-- **A managed LXD profile** (`futrx-workspace`, [`resources/manager.go`](backend/internal/integration/containers/resources/manager.go)) targets **4 GiB memory, 6 CPUs, 2000 processes** and sets `security.nesting=true` for nested-container workloads. Chromium currently launches with `--no-sandbox`, so that setting is not a Chromium sandbox guarantee. Default/profile resource convergence is best-effort because errors from the default `resources.Ensure` path are discarded; explicit per-project overrides fail launch when they cannot be applied. There is **no default disk quota.**
+- **A managed LXD profile** (`futrx-workspace`, [`resources/manager.go`](backend/internal/integration/containers/resources/manager.go)) targets **4 GiB memory, 6 CPUs, 2000 processes** and sets `security.nesting=true` for nested-container workloads. The active host browser runs as the dedicated `remote-browser` user with Chromium's sandbox enabled; the retained legacy in-container launcher still uses `--no-sandbox`. Default/profile resource convergence is best-effort because errors from the default `resources.Ensure` path are discarded; explicit per-project overrides fail launch when they cannot be applied. There is **no default disk quota.**
 - **Networking:** containers share LXD's default bridge; Caddy reaches them by `<slug>.lxd:<port>` DNS. The bridge has no inter-container ACLs by default.
 - **Everything else crosses via `lxc file push/pull` and `lxc exec`:** credentials, project secrets (as `environment.*` config and `--env` args), agent instructions, provider runtime assets, and skill links.
 
@@ -279,11 +281,11 @@ overlap, authorization, cron, and crash-recovery state machine.
 
 ## Previews, IDE, and the Agent Browser
 
-Three capabilities live inside each container ([deep dive](docs/03-platform/06-previews-and-browser.md)):
+Three browser-facing capabilities attach to each project ([deep dive](docs/03-platform/06-previews-and-browser.md)):
 
 - **App previews:** the backend runs `ss` inside the container to discover listening ports ([`listeners/scanner.go`](backend/internal/integration/containers/listeners/scanner.go), loopback binds excluded), and each becomes a `<slug>--<port>.dev.<host>` URL. No per-app proxy config is written — DNS + Caddy regex do the routing.
 - **Per-project IDE:** a pinned code-server listens on `127.0.0.1:8081` with `auth: none`, reachable only through a socket-activated proxy on `:8842` that scales to zero when idle. Authentication is entirely at the Caddy edge.
-- **Agent Browser:** one shared headed Chromium per project, driven by the user via noVNC (`:6080`) and by the agent via MCP-over-CDP (`127.0.0.1:9222`) — the *same* browser session, so the agent inherits whatever sites the user logged into. The human UI can start and view it directly; selecting the `browser` skill enables agent MCP access for Claude, Codex, or MiniMax.
+- **Agent Browser:** a host broker lazily starts one sandboxed, headed Chromium on one Xvfb display and allocates an isolated `BrowserContext` per active project. The Browser drawer renders that context through an authenticated CDP screencast WebSocket; Claude, Codex, and MiniMax receive a project-scoped Streamable HTTP MCP credential. Human and agent operate the same project tabs, while other projects have separate cookies and storage without duplicating the Chromium/Xvfb/noVNC stack.
 
 ## Frontend
 

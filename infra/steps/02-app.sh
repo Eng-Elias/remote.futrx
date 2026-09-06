@@ -26,6 +26,37 @@ log "Converging configured host agent CLIs"
 )
 ok "configured host agent CLIs match the selected module catalog"
 
+# ───────────────── shared browser broker ─────────────────
+# Chromium is installed once on the host. Project sessions become lightweight
+# BrowserContexts inside this one process instead of one full browser stack per
+# LXD container.
+log "Installing shared browser broker"
+if systemctl is-active --quiet remote.futrx-browser.service 2>/dev/null; then
+    systemctl stop remote.futrx-browser.service
+fi
+if ! getent group remote-browser >/dev/null; then
+    groupadd --system remote-browser
+fi
+if ! id -u remote-browser >/dev/null 2>&1; then
+    useradd --system --gid remote-browser --home-dir "$INSTALL_DIR/data/browser-broker/home" \
+        --shell /usr/sbin/nologin remote-browser
+fi
+install -d -o remote-browser -g remote-browser -m 0700 \
+    "$INSTALL_DIR/data/browser-broker" \
+    "$INSTALL_DIR/data/browser-broker/home" \
+    "$INSTALL_DIR/data/browser-broker/browsers" \
+    "$INSTALL_DIR/data/browser-broker/contexts"
+(
+    cd browser-broker
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --silent --no-audit --no-fund 2>&1 | tail -3
+    npx playwright install-deps chromium 2>&1 | tail -10
+    runuser -u remote-browser -- env \
+        HOME="$INSTALL_DIR/data/browser-broker/home" \
+        PLAYWRIGHT_BROWSERS_PATH="$INSTALL_DIR/data/browser-broker/browsers" \
+        npx playwright install chromium 2>&1 | tail -10
+)
+ok "shared browser broker dependencies installed"
+
 # ───────────────── build ─────────────────
 log "Building frontend (frontend/ → backend/public/)"
 (

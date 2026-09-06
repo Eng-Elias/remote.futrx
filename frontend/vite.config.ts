@@ -17,7 +17,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       // Dev: Vite serves the SPA, Go (on :7682 locally) handles API + WS.
-      "/api": "http://127.0.0.1:7682",
+      "/api": { target: "http://127.0.0.1:7682", ws: true },
       "/ws": { target: "ws://127.0.0.1:7682", ws: true },
     },
   },

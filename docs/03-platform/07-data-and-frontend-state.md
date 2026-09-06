@@ -262,7 +262,7 @@ The initial snapshot is filtered to permitted projects for members. Current live
 | Delete project | Does not currently cascade to separate chat records that reference it |
 | Delete secret | Authoritative secret entry; removal from generated `.env` and LXD environment is attempted best-effort, so stale copies are possible on sync failure |
 | Delete user | User-directory entry; project access records are not globally swept |
-| Stop Agent Browser | Processes stop; persistent profile remains in the workspace |
+| Stop Agent Browser | Project context closes; encrypted cookie/local-storage state remains on the host |
 
 ## Code map
 

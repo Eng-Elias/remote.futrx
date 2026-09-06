@@ -5,11 +5,12 @@ description: "Drive a real web browser the user logs into - open pages, read con
 
 # Browser
 
-You can drive a real Chromium running inside this container. With this skill
-active, the browser core starts automatically and you have `browser_*` MCP
-tools attached over CDP to the live shared session. If the user opens the
-Browser pane, they see the same browser and can log in by hand; you inherit
-that session's cookies without handling credentials.
+You can drive this project's isolated BrowserContext in Remote's shared host
+Chromium. With this skill active, the context starts automatically and you
+receive `browser_*` MCP tools over a project-scoped authenticated connection.
+If the user opens the Browser pane, they see the same tabs and can log in by
+hand; you inherit this project's cookies without handling credentials. Other
+projects have separate contexts, storage, tabs, and credentials.
 
 This skill is for the **Live Agent Browser** only. For one-off public
 screenshots, recordings, or cookie-authenticated headless recipes, use
@@ -31,7 +32,7 @@ Use a hybrid perception loop:
 
 Keep screenshot cost bounded: viewport screenshots by default, JPEG/moderate
 quality when options are available, full-page screenshots only when needed.
-The viewport is 1366x768 and maps 1:1 to OS-level fallback coordinates.
+The shared browser viewport is 1280x720.
 
 ## Pacing
 
@@ -41,29 +42,18 @@ multi-action bursts, especially on authenticated sites.
 
 ## Logging in
 
-This browser exits via the container's datacenter IP, so strict providers may
+This browser exits via the server's datacenter IP, so strict providers may
 show verification challenges. If a task needs a login or challenge response:
 
 1. Ask the user to open the Browser pane and log in by hand.
 2. Wait until they say the login is complete.
 3. Continue with the `browser_*` tools against the shared session.
 
-Never type the user's credentials yourself.
-
-## OS-level input fallback
-
-Use the `browser_*` tools first. If a site visibly swallows or rejects CDP
-input, fall back to X-server input with coordinates from a screenshot:
-
-```sh
-sh /workspace/.browser-gui/human-input.sh move 640 420
-sh /workspace/.browser-gui/human-input.sh click 640 420
-sh /workspace/.browser-gui/human-input.sh type "text to type"
-sh /workspace/.browser-gui/human-input.sh key Tab Return
-sh /workspace/.browser-gui/human-input.sh scroll -3
-```
-
-Coordinates map to the browser window at 0,0 on the 1366x768 display.
+Never type the user's credentials yourself. There is no project-local X server
+or raw CDP endpoint; use the scoped `browser_*` tools for all agent input.
+Host-file upload/drop and unsafe server-side code tools are intentionally not
+available. Browser file upload is currently unavailable in pooled mode; ask
+the user for an API-based or other non-browser transfer path when needed.
 
 ## Write policy
 

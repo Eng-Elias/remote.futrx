@@ -55,6 +55,7 @@ type ContainerStack struct {
 type ContainerStackOptions struct {
 	AgentInstructions  []byte
 	ImageBuildProgress serviceimage.ProgressReporter
+	BrowserBroker      containerbrowser.BrokerConfig
 }
 
 // ProjectDependencies exposes only the capabilities consumed by project
@@ -99,12 +100,30 @@ func NewContainerStack(
 	network := containernetwork.NewRepairer(runner)
 	cliRuntime := containercli.NewClient(runner)
 	cli := servicecli.NewProvisioner(cliRuntime, profiles, serviceimage.InstallScript)
-	browserAdapter := containerbrowser.NewAdapter(runner, profiles, publisher)
+	browserPort := configconstants.ProjectPreviewAgentBrowserPort
+	browserAdapterOptions := []containerbrowser.AdapterOption{}
+	var browserConnector servicebrowser.Connector
+	var browserProvisioner servicebrowser.StackProvisioner
+	var browserRuntime servicebrowser.Runtime
+	if options.BrowserBroker.Enabled() {
+		broker := containerbrowser.NewBrokerAdapter(options.BrowserBroker)
+		browserAdapterOptions = append(browserAdapterOptions, containerbrowser.WithRemoteMCP())
+		browserProvisioner = broker
+		browserRuntime = broker
+		browserConnector = broker
+		browserPort = 0
+	}
+	browserAdapter := containerbrowser.NewAdapter(runner, profiles, publisher, browserAdapterOptions...)
+	if browserProvisioner == nil {
+		browserProvisioner = browserAdapter
+		browserRuntime = browserAdapter
+	}
 	browser := servicebrowser.NewService(servicebrowser.Dependencies{
-		Provisioner: browserAdapter,
-		Runtime:     browserAdapter,
+		Provisioner: browserProvisioner,
+		Runtime:     browserRuntime,
 		Tooling:     browserAdapter,
-	}, configconstants.ProjectPreviewAgentBrowserPort)
+		Connector:   browserConnector,
+	}, browserPort)
 	codeServer := containercodeserver.NewProvisioner(runner)
 	scheduleTools := containerscheduletools.NewAdapter(runner, publisher)
 	workspace := containerworkspace.NewProvisioner(

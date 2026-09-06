@@ -21,7 +21,7 @@ var (
 )
 
 func (p *Provider) args(req agent.RunRequest) []string {
-	return codexharness.AppServerArgs(miniMaxConfigArgs(req.Model), req.EnableBrowser)
+	return codexharness.AppServerArgs(miniMaxConfigArgs(req.Model), req.EnableBrowser && req.ProjectID == "")
 }
 
 func miniMaxConfigArgs(model string) []string {
@@ -61,6 +61,9 @@ func (p *Provider) buildCmd(
 	if err != nil {
 		return nil, err
 	}
+	if req.EnableBrowser {
+		args = codexharness.WithBrowserConnection(args, project.Browser)
+	}
 	if p.runtimeAssets == nil {
 		return nil, ErrMiniMaxRuntimeUnavailable
 	}
@@ -76,6 +79,7 @@ func (p *Provider) buildCmd(
 		runtimeEnvironment[key] = value
 	}
 	runtimeEnvironment[configconstants.MiniMaxAPIKeyEnvironment] = apiKey
+	runtimeEnvironment = agent.WithBrowserEnvironment(runtimeEnvironment, project.Browser)
 	// The app-server process must outlive request cancellation long enough for
 	// codexharness.Run to send turn/interrupt and receive the terminal status.
 	return agentruntime.BuildContainerCommand(context.WithoutCancel(ctx), agentruntime.ContainerCommandSpec{

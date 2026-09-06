@@ -5,7 +5,9 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,6 +20,14 @@ type Config struct {
 	Agent      AgentOptions
 	Auth       AuthOptions
 	Schedule   ScheduleLimits
+	Browser    BrowserOptions
+}
+
+// BrowserOptions configures the optional host-level shared Chromium broker.
+// An empty BrokerURL retains the legacy per-container runtime.
+type BrowserOptions struct {
+	BrokerURL        string
+	BrokerSecretFile string
 }
 
 // AgentOptions are application-wide policies for the agent subsystem.
@@ -76,10 +86,11 @@ type ScheduleLimits struct {
 }
 
 func Load() Config {
+	dataDir := envDefault("DATA_DIR", "/opt/remote.futrx/data")
 	return Config{
 		Host:       envDefault("HOST", "127.0.0.1"),
 		Port:       envDefault("PORT", "7682"),
-		DataDir:    envDefault("DATA_DIR", "/opt/remote.futrx/data"),
+		DataDir:    dataDir,
 		InstallDir: envDefault("INSTALL_DIR", "/opt/remote.futrx"),
 		BaseURL:    envDefault("BASE_URL", ""),
 		Agent: AgentOptions{
@@ -101,6 +112,10 @@ func Load() Config {
 			MinInterval:        envDuration("SCHEDULE_MIN_INTERVAL", 5*time.Minute),
 			MaxConcurrentRuns:  envInt("SCHEDULE_MAX_CONCURRENT", 2),
 			MaxTasksPerProject: envInt("SCHEDULE_MAX_TASKS_PER_PROJECT", 20),
+		},
+		Browser: BrowserOptions{
+			BrokerURL:        strings.TrimSpace(os.Getenv("BROWSER_BROKER_URL")),
+			BrokerSecretFile: envDefault("BROWSER_BROKER_SECRET_FILE", filepath.Join(dataDir, "browser-broker.secret")),
 		},
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -371,13 +372,16 @@ func (h *ProjectHandler) handleAgentBrowser(w http.ResponseWriter, r *http.Reque
 	}
 
 	switch {
+	case r.Method == http.MethodGet && action == "view":
+		h.proxyAgentBrowserView(w, r, id)
+
 	case r.Method == http.MethodGet && action == "":
 		info, err := h.projects.AgentBrowserStatus(r.Context(), id)
 		if err != nil {
 			sendProjectError(w, err)
 			return
 		}
-		h.sendAgentBrowserInfo(w, r, info)
+		h.sendAgentBrowserInfo(w, r, id, info)
 
 	case r.Method == http.MethodPost && action == "start":
 		info, err := h.projects.StartAgentBrowser(r.Context(), id)
@@ -385,7 +389,7 @@ func (h *ProjectHandler) handleAgentBrowser(w http.ResponseWriter, r *http.Reque
 			sendProjectError(w, err)
 			return
 		}
-		h.sendAgentBrowserInfo(w, r, info)
+		h.sendAgentBrowserInfo(w, r, id, info)
 
 	case r.Method == http.MethodDelete && action == "":
 		scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
@@ -399,7 +403,7 @@ func (h *ProjectHandler) handleAgentBrowser(w http.ResponseWriter, r *http.Reque
 				sendProjectError(w, err)
 				return
 			}
-			h.sendAgentBrowserInfo(w, r, info)
+			h.sendAgentBrowserInfo(w, r, id, info)
 			return
 		}
 		if err := h.projects.StopAgentBrowser(r.Context(), id); err != nil {
@@ -418,7 +422,7 @@ func (h *ProjectHandler) handleAgentBrowser(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (h *ProjectHandler) sendAgentBrowserInfo(w http.ResponseWriter, r *http.Request, info serviceproject.AgentBrowserInfo) {
+func (h *ProjectHandler) sendAgentBrowserInfo(w http.ResponseWriter, r *http.Request, id serviceproject.ID, info serviceproject.AgentBrowserInfo) {
 	resp := agentBrowserResponse{
 		Status:       info.Status,
 		Slug:         info.Slug,
@@ -430,13 +434,21 @@ func (h *ProjectHandler) sendAgentBrowserInfo(w http.ResponseWriter, r *http.Req
 		UptimeSec:    info.UptimeSec,
 		LastActivity: info.LastActivity,
 	}
-	if info.Status == serviceproject.AgentBrowserStatusReady && info.Slug != "" && info.Port != 0 {
-		resp.URL = buildAgentBrowserURL(r, info.Slug, info.Port)
+	if info.Status == serviceproject.AgentBrowserStatusReady {
+		if info.Slug != "" && info.Port != 0 {
+			resp.URL = buildLegacyAgentBrowserURL(r, info.Slug, info.Port)
+		} else {
+			resp.URL = buildAgentBrowserURL(id)
+		}
 	}
 	httptransport.SendJSON(w, http.StatusOK, resp)
 }
 
-func buildAgentBrowserURL(r *http.Request, slug string, port int) string {
+func buildAgentBrowserURL(id serviceproject.ID) string {
+	return "/api/projects/" + url.PathEscape(string(id)) + "/agent-browser/view"
+}
+
+func buildLegacyAgentBrowserURL(r *http.Request, slug string, port int) string {
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = r.Host
@@ -456,6 +468,62 @@ func buildAgentBrowserURL(r *http.Request, slug string, port int) string {
 		}
 	}
 	return fmt.Sprintf("%s://%s--%d.dev.%s/vnc.html?autoconnect=1&resize=scale&reconnect=1", scheme, slug, port, host)
+}
+
+func (h *ProjectHandler) proxyAgentBrowserView(w http.ResponseWriter, r *http.Request, id serviceproject.ID) {
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		httptransport.SendErr(w, http.StatusUpgradeRequired, "agent browser view requires a WebSocket")
+		return
+	}
+	if !browserViewOriginAllowed(r) {
+		httptransport.SendErr(w, http.StatusForbidden, "agent browser view origin is not allowed")
+		return
+	}
+	target, err := h.projects.AgentBrowserViewTarget(r.Context(), id)
+	if err != nil {
+		sendProjectError(w, err)
+		return
+	}
+	upstream, err := url.Parse(target.URL)
+	if err != nil || upstream.Scheme == "" || upstream.Host == "" {
+		httptransport.SendErr(w, http.StatusBadGateway, "agent browser view unavailable")
+		return
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	direct := proxy.Director
+	proxy.Director = func(request *http.Request) {
+		direct(request)
+		request.URL.Path = upstream.Path
+		request.URL.RawPath = upstream.RawPath
+		request.URL.RawQuery = upstream.RawQuery
+		request.Host = upstream.Host
+		request.Header.Del("Cookie")
+		request.Header.Set("Authorization", "Bearer "+target.BearerToken)
+	}
+	proxy.ErrorHandler = func(response http.ResponseWriter, _ *http.Request, _ error) {
+		httptransport.SendErr(response, http.StatusBadGateway, "agent browser view unavailable")
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+// browserViewOriginAllowed prevents an untrusted project preview on a sibling
+// subdomain from using the user's same-site session cookie to control the
+// authenticated browser WebSocket. Browser clients send Origin and cannot
+// forge it; non-browser broker traffic never reaches this public route.
+func browserViewOriginAllowed(r *http.Request) bool {
+	origin, err := url.Parse(strings.TrimSpace(r.Header.Get("Origin")))
+	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.User != nil {
+		return false
+	}
+	scheme := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return strings.EqualFold(origin.Scheme, scheme) && strings.EqualFold(origin.Host, r.Host)
 }
 
 // HandleTLSAsk lets Caddy issue on-demand certificates only for preview and
@@ -676,7 +744,8 @@ func sendProjectError(w http.ResponseWriter, err error) {
 		errors.Is(err, serviceproject.ErrInvalidSecretKey),
 		errors.Is(err, serviceproject.ErrInvalidLimits):
 		httptransport.SendErr(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, serviceproject.ErrSecretsUnavailable):
+	case errors.Is(err, serviceproject.ErrSecretsUnavailable),
+		errors.Is(err, serviceproject.ErrAgentBrowserViewUnavailable):
 		httptransport.SendErr(w, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, serviceproject.ErrNameAlreadyExists):
 		httptransport.SendErr(w, http.StatusConflict, err.Error())

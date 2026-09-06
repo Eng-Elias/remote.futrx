@@ -124,6 +124,7 @@ flowchart TB
         Policy["Identity, membership, run and project policy"]
         Stores["Chats, projects, access, settings, secrets"]
         Orchestrator["LXD lifecycle, limits, recovery"]
+        BrowserBroker["Unprivileged shared browser broker"]
     end
 
     Edge --> API
@@ -135,7 +136,7 @@ flowchart TB
         Agent["Selected agent CLI as container root"]
         Tools["Linux, packages, Git, runtimes, skills"]
         Apps["Project processes and app ports"]
-        Browser["Shared headed Chromium and noVNC"]
+        Browser["Project BrowserContext"]
         IDE["code-server"]
         Terminal["Terminal PTY"]
         Durable["Workspace and provider homes"]
@@ -144,15 +145,16 @@ flowchart TB
     Orchestrator --> Cell
     Agent --> Tools
     Agent --> Apps
-    Agent --> Browser
+    Agent -->|"scoped MCP"| Browser
+    Browser --> BrowserBroker
     Agent --> Durable
     API -->|"authenticated terminal WebSocket"| Terminal
     Edge -->|"authenticated project URLs"| Apps
     Edge -->|"forward-authenticated IDE URL"| IDE
-    Edge -->|"forward-authenticated noVNC URL"| Browser
+    API -->|"authenticated live-view WebSocket"| BrowserBroker
 ```
 
-The main UI, API, and WebSockets authenticate in the Go backend. Caddy's forward-authentication and platform-cookie stripping apply to project-facing IDE, preview, and noVNC routes. The control plane is intentionally not another tool available to container root. The agent may be root **inside** the project, but it does not receive the host's LXD controls, platform session store, other project mounts, or arbitrary host filesystem access beyond the project paths explicitly mounted into its container.
+The main UI, API, and WebSockets authenticate in the Go backend. Caddy's forward-authentication and platform-cookie stripping apply to project-facing IDE and preview routes. Agent Browser views stay on the main application origin and are proxied to the broker with server-side project credentials. The control plane is intentionally not another tool available to container root. The agent may be root **inside** the project, but it does not receive the host's LXD controls, platform session store, other project mounts, or arbitrary host filesystem access beyond the project paths explicitly mounted into its container.
 
 The separation is the core safety mechanism:
 
@@ -204,7 +206,7 @@ flowchart LR
 
 | Durable layer | Container path | Purpose |
 | --- | --- | --- |
-| Project workspace | `/workspace` | Source, artifacts, uploads, project skills, generated `.env`, browser profile, and project-owned state |
+| Project workspace | `/workspace` | Source, artifacts, uploads, project skills, generated `.env`, and project-owned state |
 | Codex home | `/root/.codex` | Codex provider configuration, authentication, sessions, and provider-owned state |
 | MiniMax home | `/root/.minimax` | Isolated Codex-harness model configuration, MiniMax sessions, and provider-owned state; the host injects the managed Token Plan subscription key at run time |
 | Claude home | `/root/.claude` | Claude provider configuration, authentication, sessions, and provider-owned state |
@@ -223,7 +225,7 @@ whole `.gemini` directory.
 Project skills have one canonical source at `/workspace/.agents/skills`;
 provider-specific paths are compatibility links rather than competing copies.
 
-The host also manages provider authentication. Host-wide provider credentials may be synchronized into the project before a run and back after it. Most synchronized files live in provider homes; Claude also uses `/root/.claude.json` in the replaceable root filesystem. Bidirectional synchronization means a project agent can potentially change host-wide provider state that is later used by other projects. That makes provider identity fleet-scoped even though project files, browser profiles, and project secrets are project-scoped. These are different trust domains and should remain visibly distinct.
+The host also manages provider authentication. Host-wide provider credentials may be synchronized into the project before a run and back after it. Most synchronized files live in provider homes; Claude also uses `/root/.claude.json` in the replaceable root filesystem. Bidirectional synchronization means a project agent can potentially change host-wide provider state that is later used by other projects. That makes provider identity fleet-scoped even though project files, browser contexts, and project secrets are project-scoped. These are different trust domains and should remain visibly distinct.
 
 ## What the agent receives
 
@@ -244,8 +246,8 @@ The capability envelope should be complete enough that the agent can move from i
 | Processes | Foreground and background processes; background work may continue between prompts while the container stays running |
 | Network | Outbound networking and project app listeners; the current project instructions describe network access as open |
 | Web applications | Any non-loopback TCP listener on an allowed preview port from 1024 through 65535 can be discovered and exposed through an authenticated project URL |
-| Browser automation | A headless Playwright utility plus a shared headed Chromium. Claude, Codex, and MiniMax can receive per-run MCP/CDP preparation; Kimi and Antigravity do not yet have equivalent browser enablement |
-| Human-visible desktop | noVNC lets the user view and take over the same headed browser session |
+| Browser automation | A headless Playwright utility plus one host headed Chromium with a separate BrowserContext per project. Claude, Codex, and MiniMax can receive per-run scoped HTTP MCP access; Kimi and Antigravity do not yet have equivalent browser enablement |
+| Human-visible browser | An authenticated screencast WebSocket lets the user view and take over the same project tabs |
 | Development surfaces | Terminal, browser IDE, files and media, uploads, Git history, app preview, element inspection, and scheduled tasks over the same workspace |
 | Project credentials | Agent runs receive project secrets as environment values; persistable single-line values also reach new container processes, and all values are mirrored to `/workspace/.env` for dotenv-aware tools |
 | Concurrency | Several chats may work concurrently; the execution lock is per chat, so agents sharing files, Git state, ports, and processes can race and must coordinate |
@@ -333,7 +335,8 @@ Remote separates valuable state from replaceable machinery. This lets the runtim
 ```mermaid
 flowchart TB
     Intent["Human intent and conversation history"] --> ProjectState["Durable project state"]
-    ProjectState --> Workspace["Workspace, skills, artifacts, browser profile"]
+    ProjectState --> Workspace["Workspace, skills, artifacts"]
+    ProjectState --> BrowserState["Encrypted project browser storage state"]
     ProjectState --> AgentHomes["Codex, MiniMax, Claude, Kimi, and Antigravity homes"]
     ProjectState --> Scheduled["Scheduled task definitions and claims"]
     ProjectState --> Metadata["Metadata, access, secrets, event logs"]
@@ -391,7 +394,7 @@ Remote has four credential classes, each with a different scope:
 | Platform session | User and Remote control plane | Kept in secure HTTP-only cookies and stripped before requests enter project-controlled apps and IDEs |
 | Agent-provider identity | Host-wide for Claude, Codex, Kimi, and the MiniMax Token Plan subscription key; supported project runtime for Antigravity | Claude, Codex, and Kimi are connected by an administrator and synchronized bidirectionally with project state. The write-only MiniMax subscription key is stored by the control plane and injected only into MiniMax runs, while Codex-harness state stays in each project's mounted MiniMax home. Remote's Antigravity UI flow authenticates inside each project and its mounted provider state survives container replacement; operator-prepared host `agy` state can still be used by loose chats outside that flow |
 | Project secret | One project | Stored in a host file with mode `0600` but without application-level encryption; passed to agent runs, persisted as container environment when single-line, and mirrored into the managed `.env` file |
-| Browser-session identity | One project browser profile | Created through human login and persisted with the project so the agent can use the authenticated session |
+| Browser-session identity | One project BrowserContext | Created through human login and persisted as encrypted storage state so the project's agent can use the authenticated session |
 
 Project secrets are **agent-readable authority**. They are not hidden capabilities: a sufficiently authorized agent process can read its environment and `/workspace/.env`. The correct safety question is not whether the model can see a secret it has been given, but whether that authority is scoped, observable, revocable, and appropriate for the project. Comprehensive audit coverage is a separate hardening requirement.
 
@@ -457,7 +460,7 @@ The philosophy is also an acceptance test. The following current behaviors narro
 | Gap | Consequence |
 | --- | --- |
 | Loose chats run approval-free provider CLIs directly as the production host service user, currently root, and are visible to all registered users | A loose chat can reach platform data, provider credentials, project roots, and host controls such as `lxc`; it is outside the project-isolation promise and is the highest-priority boundary violation |
-| Project containers share the default LXD bridge without repository-defined inter-project network policy; code-server and noVNC listen on non-loopback interfaces without their own authentication | A sibling project can potentially bypass Caddy and reach another project's IDE or browser directly, crossing from network reach into files, processes, or browser identity |
+| Project containers share the default LXD bridge without repository-defined inter-project network policy; code-server listens on a non-loopback socket-activation port without its own authentication | A sibling project can potentially bypass Caddy and reach another project's IDE directly, crossing from network reach into files and processes; the shared browser broker now requires a project-scoped credential |
 | IDE forward authentication checks registered-user status but not project membership | An IDE URL does not yet enforce the same project boundary as a preview URL |
 | Incremental workspace-hub events are broadly broadcast after the initial filtered snapshot | Metadata synchronization does not yet have uniform per-event project filtering |
 | Membership is checked when chat and terminal WebSockets open, but active sockets are not revoked when membership changes | Removing a member blocks future checked connections but may not immediately stop an already-open control channel |
@@ -473,7 +476,7 @@ The philosophy is also an acceptance test. The following current behaviors narro
 | The durable event stream covers provider-emitted run events, not every terminal, IDE, background process, browser, network, or secret action | Remote does not yet provide a comprehensive project audit log |
 | Run ownership and cancellation state are in memory while provider children may survive a backend restart | The control plane may lose visibility and cancellation authority over a surviving process and accept a new concurrent run |
 | Upgrade busy detection does not currently match the argument order used by provider `lxc exec` commands | An active project may be recycled during an upgrade instead of being safely skipped |
-| The Agent Browser runs without its own Chromium sandbox inside the container | Its primary containment boundary is the outer LXD project container |
+| BrowserContexts share one host Chromium process tree | Cookies and normal browser storage are isolated, but a browser-process compromise could cross project contexts; this is not VM-grade isolation |
 | Containers share the host kernel | This is container isolation, not a VM or physical-machine boundary |
 | Irreversible browser confirmation is instruction policy | The platform does not yet enforce a universal approval gate for every external side effect |
 

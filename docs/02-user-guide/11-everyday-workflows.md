@@ -46,7 +46,7 @@ Parallelism happens across chats and projects, not inside one chat.
 
 ![Independent chats working in parallel inside the same Remote workspace](/assets/docs/screenshots/parallel-agents.webp)
 
-Concurrent chats in one project share the same files, processes, ports, browser profile, and Git repositories. They can race. Separate projects provide a stronger execution boundary.
+Concurrent chats in one project share the same files, processes, ports, browser context, and Git repositories. They can race. Separate projects provide a stronger execution boundary.
 
 ## Switch provider without moving the project
 
@@ -101,7 +101,7 @@ Use the Agent Browser when the task needs a real login, consent screen, anti-bot
 8. Watch the shared browser and intervene when needed.
 9. Use the square **Stop the agent browser** control when finished.
 
-The agent and human share one browser profile and one window. Never sign in to an account whose authority you are unwilling to expose to the agent.
+The agent and human share one project BrowserContext and its tabs. Never sign in to an account whose authority you are unwilling to expose to that project's agents and collaborators.
 
 ## Use a secret-dependent service
 

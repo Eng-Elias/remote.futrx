@@ -1,0 +1,16 @@
+{
+  "name": "@remote.futrx/browser-broker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test --test-concurrency=1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@playwright/mcp": "0.0.80",
+    "playwright": "1.63.0-alpha-2026-08-31",
+    "ws": "8.21.3"
+  }
+}

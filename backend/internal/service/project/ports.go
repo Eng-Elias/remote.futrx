@@ -1,6 +1,13 @@
 package project
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrAgentBrowserViewUnavailable is returned by legacy browser runtimes that
+// expose no brokered per-context view.
+var ErrAgentBrowserViewUnavailable = errors.New("agent browser view is unavailable")
 
 type Repository interface {
 	List(ctx context.Context) ([]Meta, error)

@@ -12,6 +12,8 @@ set -euo pipefail
 
 SERVICE_NAME="remote.futrx.service"
 SERVICE_UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
+BROWSER_SERVICE_NAME="remote.futrx-browser.service"
+BROWSER_SERVICE_UNIT_PATH="/etc/systemd/system/$BROWSER_SERVICE_NAME"
 LEGACY_SERVICE_NAME="remote.futrx.dev.service"
 LEGACY_SERVICE_UNIT_PATH="/etc/systemd/system/$LEGACY_SERVICE_NAME"
 HOST_CLI_PROFILE_PATH="/etc/profile.d/remote-futrx-host-clis.sh"
@@ -20,6 +22,45 @@ HOST_CLI_PROFILE_PATH="/etc/profile.d/remote-futrx-host-clis.sh"
 . "$INFRA_DIR/lib/install-migration.sh"
 # shellcheck source=../lib/health-check.sh
 . "$INFRA_DIR/lib/health-check.sh"
+
+if [ -z "${LXD_BRIDGE_IP:-}" ]; then
+    err "Cannot configure the shared browser broker without the LXD bridge IPv4 address."
+    exit 1
+fi
+
+# ───────────────── browser broker ─────────────────
+log "Configuring shared browser broker"
+install -d -o remote-browser -g remote-browser -m 0700 "$INSTALL_DIR/data/browser-broker"
+if [ ! -s "$INSTALL_DIR/data/browser-broker.secret" ]; then
+    umask 0077
+    head -c 48 /dev/urandom | base64 > "$INSTALL_DIR/data/browser-broker.secret"
+fi
+chown root:remote-browser "$INSTALL_DIR/data/browser-broker.secret"
+chmod 0640 "$INSTALL_DIR/data/browser-broker.secret"
+render_template "${INFRA_DIR}/templates/remote.futrx-browser.service.tmpl" \
+                "$BROWSER_SERVICE_UNIT_PATH"
+systemctl daemon-reload
+if systemctl is-active --quiet "$BROWSER_SERVICE_NAME"; then
+    systemctl restart "$BROWSER_SERVICE_NAME"
+else
+    systemctl enable --now "$BROWSER_SERVICE_NAME"
+fi
+if ! wait_for_http_health "http://${LXD_BRIDGE_IP}:9323/health" 30; then
+    err "$BROWSER_SERVICE_NAME did not become healthy"
+    journalctl -u "$BROWSER_SERVICE_NAME" -n 50 --no-pager >&2 || true
+    exit 1
+fi
+ok "shared browser broker responding"
+
+# Stop browser processes left running by a legacy or rolled-back release.
+# Profiles stay on durable workspace mounts, so this is safe and idempotent.
+log "Stopping legacy per-container browser stacks"
+while IFS= read -r container_name; do
+    [ -n "$container_name" ] || continue
+    lxc exec "$container_name" -- sh -c \
+        'if [ -x /workspace/.browser-gui/gui-up.sh ]; then /workspace/.browser-gui/gui-up.sh stop; fi' \
+        >/dev/null 2>&1 || warn "Could not stop legacy browser in $container_name"
+done < <(lxc list status=running -c n --format csv)
 
 # ───────────────── systemd unit ─────────────────
 log "Rendering $HOST_CLI_PROFILE_PATH"
@@ -87,4 +128,5 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
     log "Opening UFW for 80 + 443"
     ufw allow 80/tcp  >/dev/null || true
     ufw allow 443/tcp >/dev/null || true
+    ufw allow in on "${LXD_BRIDGE:-lxdbr0}" to "${LXD_BRIDGE_IP}" port 9323 proto tcp >/dev/null || true
 fi

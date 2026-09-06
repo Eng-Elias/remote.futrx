@@ -349,6 +349,7 @@ cat <<EOF
 
  Manage:
    systemctl status   remote.futrx
+   systemctl status   remote.futrx-browser
    systemctl status   caddy
    journalctl -u      remote.futrx -f
 

@@ -1,8 +1,8 @@
-// Package browser provisions and controls the project container's shared
-// headed-browser feature and its agent tooling.
+// Package browser owns legacy in-container browser operations, shared-broker
+// authentication, and the agent-side browser tooling assets.
 package browser
 
-// Agent Browser provisioning: brings up a real headed Google Chrome inside
+// Legacy Agent Browser provisioning brings up a real headed Chrome inside
 // the project container, rendered on a virtual display (Xvfb) and exposed two
 // ways onto the SAME session - a noVNC web view the user logs in through, and
 // a loopback CDP port the agent drives. The launcher script
@@ -31,10 +31,21 @@ type Adapter struct {
 	config      agentBrowserConfigurator
 }
 
+// AdapterOption configures browser tooling without changing legacy callers.
+type AdapterOption func(*Adapter)
+
+// WithRemoteMCP publishes remote HTTP MCP configuration and skips installing
+// a Playwright MCP process inside every project container.
+func WithRemoteMCP() AdapterOption {
+	return func(adapter *Adapter) {
+		adapter.mcp.remote = true
+	}
+}
+
 // NewAdapter returns raw browser operations backed by shared container
 // dependencies.
-func NewAdapter(runner command.Runner, profileSource serviceprofiles.Source, publisher *assets.Publisher) *Adapter {
-	return &Adapter{
+func NewAdapter(runner command.Runner, profileSource serviceprofiles.Source, publisher *assets.Publisher, options ...AdapterOption) *Adapter {
+	adapter := &Adapter{
 		runner:      runner,
 		publisher:   publisher,
 		provisioner: agentBrowserProvisioner{runner: runner, publisher: publisher},
@@ -46,6 +57,12 @@ func NewAdapter(runner command.Runner, profileSource serviceprofiles.Source, pub
 		},
 		config: agentBrowserConfigurator{runner: runner},
 	}
+	for _, option := range options {
+		if option != nil {
+			option(adapter)
+		}
+	}
+	return adapter
 }
 
 // Provision installs the browser stack and publishes its runtime templates.

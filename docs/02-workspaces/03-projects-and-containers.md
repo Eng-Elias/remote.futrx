@@ -51,7 +51,7 @@ flowchart LR
     Homes --> Kimi["Mounted at /root/.kimi-code"]
     Homes --> Antigravity["Mounted at /root/.gemini/antigravity-cli"]
     Container --> RootFS["Replaceable root filesystem"]
-    Container --> Tools["Agent CLIs, code-server, Chromium"]
+    Container --> Tools["Agent CLIs and code-server"]
     Container --> Processes["Agent, terminal, and app processes"]
 ```
 
@@ -110,7 +110,7 @@ The reusable Ubuntu 24.04 base image contains:
 - Node.js 22, Git, SSH client, `jq`, build tools, Python, and GitHub CLI.
 - Claude Code, Codex, Kimi Code, and Antigravity at pinned versions. MiniMax
   reuses the pinned Codex CLI with an isolated provider configuration.
-- The Agent Browser stack and Chromium.
+- Legacy Agent Browser packages retained for rollback. Active browser contexts run in the host-level shared broker.
 - `code-server` with on-demand startup.
 
 Launch-time provisioning then:

@@ -1,9 +1,10 @@
 # Agent Browser
 
-Agent Browser is one headed Chromium session shared by a person and an agent
-inside a project. Use it when the work depends on a real website, a visual
-login, consent, or another step that cannot be completed through the local app
-preview.
+Agent Browser is one isolated browser session shared by a person and an agent
+inside a project. Active projects use separate BrowserContexts inside one
+host-level headed Chromium, avoiding a full Chrome/Xvfb/noVNC stack for every
+workspace. Use it when work depends on a real website, visual login, consent,
+or another step that cannot be completed through the local app preview.
 
 ![The shared Agent Browser open beside a project chat](/assets/docs/screenshots/agent-browser.webp)
 
@@ -35,25 +36,26 @@ preview.
    browser core available, or select **Stop the agent browser** to stop the
    complete stack.
 
-**Outcome:** the human noVNC pane and the agent's CDP/MCP tools operate the same
-Chromium window and persistent profile. A login completed by the human is
-therefore immediately available to the browser-enabled agent.
+**Outcome:** the human live pane and the agent's MCP tools operate the same
+project tabs and isolated storage. A login completed by the human is therefore
+immediately available to the browser-enabled agent, but not to another project.
 
 ![Human intervention in the same browser session](/assets/docs/screenshots/16-human-browser-intervention-12m40s.webp "This authentic demo capture shows a consent step in the shared session. Site prompts and browser warnings are part of the captured environment, not Remote endorsements.")
 
 ## Shared-session architecture
 
 ```mermaid
-flowchart LR
-    Human["Human controls<br/>noVNC pane"] --> Display["Shared virtual display"]
-    Agent["Claude, Codex, or MiniMax<br/>browser skill"] -->|"MCP over CDP"| Chromium["Headed Chromium"]
-    Chromium --> Display
-    Chromium --> Profile["Persistent project<br/>browser profile"]
+flowchart TB
+    Human["Human controls<br/>live canvas"] -->|"authenticated WebSocket"| Context["Project BrowserContext"]
+    Agent["Claude, Codex, or MiniMax<br/>browser skill"] -->|"project-scoped HTTP MCP"| Context
+    Context --> Chromium["One shared headed Chromium"]
+    Context --> Profile["Encrypted project<br/>storage state"]
 ```
 
 There is one Agent Browser session per project, not one per user, chat, or
-agent run. Its viewport is fixed at **1366×768**. Human and agent input can
-collide, so pause one side before the other types or clicks.
+agent run. Its viewport is fixed at **1280×720**. Human and agent input can
+collide, so pause one side before the other types or clicks. Different projects
+can be logged into different accounts on the same site at the same time.
 
 ## Start, close, and stop mean different things
 
@@ -61,32 +63,34 @@ collide, so pause one side before the other types or clicks.
 stateDiagram-v2
     [*] --> Stopped
     Stopped --> Starting: open Agent Browser or start browser-enabled work
-    Starting --> CoreReady: Chromium/CDP ready
-    Starting --> Ready: Chromium and human view ready
+    Starting --> CoreReady: project context/MCP ready
+    Starting --> Ready: project context and human view ready
     CoreReady --> Ready: open human view
     Ready --> CoreReady: close drawer or leave Agent Browser
     CoreReady --> Stopped: explicit stop or 20-minute idle reaper
     Ready --> Stopped: explicit stop or 20-minute idle reaper
 ```
 
-| Action | Human view | Agent-facing browser core | Profile and login data |
+| Action | Human view | Agent-facing project context | Login data |
 | --- | --- | --- | --- |
 | Select Agent Browser | Starts or reconnects | Starts if needed | Reused |
 | Select **Close browser** | Stops | Keeps running | Kept |
 | Toggle back to app preview | Stops | Keeps running | Kept |
-| Select **Stop the agent browser** | Stops | Stops | Kept |
-| Replace the project container | Stops | Stops until restarted | Kept in durable workspace storage |
+| Select **Stop the agent browser** | Stops | Context closes | Saved encrypted on the host |
+| Replace the project container | Stops | Context can stay available | Kept in encrypted host storage |
 
 Closing the pane is therefore not a full browser stop. Use **Stop the agent
-browser** when the project should no longer have a live Chromium process.
-Stopping does not sign out of websites or delete the profile.
+browser** when the project should no longer have an active context. Chromium
+itself exits only after the final project context is gone and its short process
+idle timer expires. Stopping does not sign out of websites or delete saved login
+state.
 
 ## Idle reaping
 
 The backend checks browser activity every minute. It stops the complete stack
 after **20 minutes** without pane or browser-enabled agent activity.
 
-An attached VNC TCP viewer counts as an active viewer. Close or leave the pane
+An attached live-view WebSocket counts as an active viewer. Close or leave the pane
 if you expect the idle reaper to reclaim the browser. A browser-enabled agent
 run also sends activity heartbeats while it is using the session.
 
@@ -94,16 +98,26 @@ run also sends activity heartbeats while it is using the session.
 
 - Every authorized actor and browser-enabled agent working in the project
   reaches the same profile and window.
-- The profile survives normal container replacement, so cookies and site
-  sessions can outlive one Chromium process.
-- The browser has normal outbound network access; it is not restricted to
-  project preview hosts.
+- Encrypted storage state survives normal container replacement, so cookies,
+  local storage, and IndexedDB sessions can outlive one Chromium process.
+- Each context has normal public internet access. Private, link-local, cloud
+  metadata, and sibling `.lxd` targets are blocked; only its own `.lxd` name is
+  allowed on the project bridge.
 - There is no per-task browser profile, per-chat session, or incognito
   boundary.
-- A screenshot or noVNC view exposes what is on the virtual display. The agent
-  can also read and operate pages through CDP.
-- Stop semantics preserve the profile. Sign out on the website or clear its
+- The live screencast exposes what is in the project's active tab. The agent
+  can read and operate all tabs in that same project context through MCP.
+- The canvas streams web-page content, not Chromium's native window chrome.
+  Browser permission bubbles, certificate dialogs, and other browser-owned UI
+  are not available in the human view; browser file selection is also disabled.
+- BrowserContext isolation separates normal web identity and storage, but it is
+  not a VM/process security boundary. Projects facing mutually hostile browser
+  code still require separate browser processes or servers.
+- Stop semantics preserve storage state. Sign out on the website or clear its
   data when persistence is not desired.
+- Legacy per-container Chrome profiles are kept for rollback but are not
+  imported automatically; sign in once when a project first uses the pooled
+  browser.
 - Some sites block automation. Do not defeat CAPTCHA, anti-bot, consent, or
   authorization controls that the site requires.
 
