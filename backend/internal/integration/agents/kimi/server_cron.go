@@ -60,7 +60,7 @@ func (r *serverRun) saveCron(ctx context.Context, p *serverTransport) error {
 	if !r.cronDirty {
 		return nil
 	}
-	if err := p.api(ctx, "POST", r.path()+"/profile", map[string]any{"metadata": map[string]any{"remote_kimi_cron_jobs": r.cronJobs}}, nil); err != nil {
+	if err := p.api(ctx, "POST", r.path()+"/profile", nativeProfileUpdate{Metadata: &nativeCronMetadata{Jobs: r.cronJobs}}, nil); err != nil {
 		return err
 	}
 	r.cronDirty = false

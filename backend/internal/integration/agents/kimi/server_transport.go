@@ -105,10 +105,10 @@ func (p *serverTransport) read(ctx context.Context) (bridgeFrame, error) {
 	}
 }
 
-func (p *serverTransport) request(ctx context.Context, request map[string]any, result any) error {
+func (p *serverTransport) request(ctx context.Context, request bridgeRequest, result any) error {
 	p.nextID++
 	id := p.nextID
-	request["id"] = id
+	request.ID = id
 	if err := p.write(request); err != nil {
 		return err
 	}
@@ -139,10 +139,7 @@ func (p *serverTransport) request(ctx context.Context, request map[string]any, r
 }
 
 func (p *serverTransport) api(ctx context.Context, method, path string, body, result any) error {
-	request := map[string]any{"type": "http", "method": method, "path": path}
-	if body != nil {
-		request["body"] = body
-	}
+	request := bridgeRequest{Type: "http", Method: method, Path: path, Body: body}
 	return p.request(ctx, request, result)
 }
 
