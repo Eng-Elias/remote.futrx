@@ -2,9 +2,13 @@
 // image consumed by project containers.
 package image
 
-// Base-image provisioning. The same install script is used in two places:
-//   1. As the recipe baked into the published futrx-remote-dev-base image.
-//   2. As the fallback when an already-running container predates Node/npm.
+// Base-image provisioning. The agent CLI install script is used both in the
+// published futrx-remote-dev-base image and as the fallback when an
+// already-running container predates Node/npm.
+//
+// Chromium deliberately is not baked into this image. The Agent Browser runs
+// in the shared host broker, so putting the legacy browser stack in every
+// project rootfs only increases image size and update time.
 //
 // Agent packages supply CLI definitions through provisioning profiles, so
 // image builds and runtime repair use the same tested pins as prompt startup.
@@ -38,7 +42,7 @@ const (
 	baseImageNetworkTimeout  = 90 * time.Second
 	baseImageNetworkPoll     = 2 * time.Second
 	baseImageProgressTick    = 30 * time.Second
-	baseImageBuildStageCount = 6
+	baseImageBuildStageCount = 5
 	deleteTimeout            = 30 * time.Second
 )
 
@@ -110,7 +114,6 @@ func (b *Builder) reportProgress(progress Progress) {
 type Builder struct {
 	runtime                 Runtime
 	profiles                ProfileSource
-	browserInstallScript    string
 	codeServerInstallScript []byte
 	networkWarmup           time.Duration
 	networkTimeout          time.Duration
@@ -123,14 +126,12 @@ type Builder struct {
 func NewBuilder(
 	runtime Runtime,
 	profileSource ProfileSource,
-	browserInstallScript string,
 	codeServerInstallScript []byte,
 	progress ProgressReporter,
 ) *Builder {
 	return &Builder{
 		runtime:                 runtime,
 		profiles:                profileSource,
-		browserInstallScript:    browserInstallScript,
 		codeServerInstallScript: codeServerInstallScript,
 		networkWarmup:           baseImageNetworkWarmup,
 		networkTimeout:          baseImageNetworkTimeout,
@@ -203,21 +204,14 @@ func (b *Builder) Build(ctx context.Context, alias string) error {
 		return fmt.Errorf("install script: %w; output: %s", err, output.TruncateTail(out, 2000))
 	}
 
-	out, err = b.runBuildStage(3, "Installing the agent browser and Chromium", func() (string, error) {
-		return b.runtime.ExecuteScript(bctx, baseImageBuilderName, b.browserInstallScript)
-	})
-	if err != nil {
-		return fmt.Errorf("agent browser install script: %w; output: %s", err, output.TruncateTail(out, 2000))
-	}
-
-	out, err = b.runBuildStage(4, "Installing the browser IDE", func() (string, error) {
+	out, err = b.runBuildStage(3, "Installing the browser IDE", func() (string, error) {
 		return b.runtime.ExecuteScript(bctx, baseImageBuilderName, string(b.codeServerInstallScript))
 	})
 	if err != nil {
 		return fmt.Errorf("code-server install script: %w; output: %s", err, output.TruncateTail(out, 2000))
 	}
 
-	out, err = b.runBuildStage(5, "Finalizing the builder container", func() (string, error) {
+	out, err = b.runBuildStage(4, "Finalizing the builder container", func() (string, error) {
 		return b.runtime.StopContainer(bctx, baseImageBuilderName)
 	})
 	if err != nil {
@@ -226,7 +220,7 @@ func (b *Builder) Build(ctx context.Context, alias string) error {
 
 	pctx, pcancel := context.WithTimeout(ctx, baseImagePublishTimeout)
 	defer pcancel()
-	out, err = b.runBuildStage(6, "Publishing the reusable workspace image", func() (string, error) {
+	out, err = b.runBuildStage(5, "Publishing the reusable workspace image", func() (string, error) {
 		return b.runtime.PublishImage(
 			pctx,
 			baseImageBuilderName,

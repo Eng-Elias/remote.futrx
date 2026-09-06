@@ -135,7 +135,6 @@ func NewContainerStack(
 	images := serviceimage.NewBuilder(
 		containerbaseimage.NewClient(runner),
 		profiles,
-		containerbrowser.InstallScript(),
 		containercodeserver.InstallScript(),
 		options.ImageBuildProgress,
 	)

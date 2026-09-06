@@ -88,7 +88,7 @@ func configuredProfiles() []provisioning.Profile {
 func TestBuildPreservesImageWorkflowOrder(t *testing.T) {
 	runtime := &recordingRuntime{available: true}
 	profiles := &recordingProfileSource{profiles: configuredProfiles()}
-	builder := NewBuilder(runtime, profiles, "browser-install", []byte("code-server-install"), nil)
+	builder := NewBuilder(runtime, profiles, []byte("code-server-install"), nil)
 	builder.networkWarmup = 0
 
 	if err := builder.Build(context.Background(), ""); err != nil {
@@ -104,7 +104,6 @@ func TestBuildPreservesImageWorkflowOrder(t *testing.T) {
 		"launch " + SourceImage + " " + baseImageBuilderName,
 		"script " + baseImageBuilderName + " " + ipv4EgressProbe,
 		"script " + baseImageBuilderName + " " + installScript,
-		"script " + baseImageBuilderName + " browser-install",
 		"script " + baseImageBuilderName + " code-server-install",
 		"stop " + baseImageBuilderName,
 		"publish " + baseImageBuilderName + " " + Alias + " futrx remote dev base: ubuntu 24.04 + node 22 + alpha-cli",
@@ -126,7 +125,6 @@ func TestBuildStopsBeforeAnyStageWhenContainerHasNoIPv4Egress(t *testing.T) {
 	builder := NewBuilder(
 		runtime,
 		&recordingProfileSource{profiles: configuredProfiles()},
-		"browser-install",
 		[]byte("code-server-install"),
 		nil,
 	)
@@ -156,7 +154,7 @@ func TestBuildStopsBeforeAnyStageWhenContainerHasNoIPv4Egress(t *testing.T) {
 	}
 }
 
-func TestBuildPreservesErrorOutputAndDeferredCleanup(t *testing.T) {
+func TestBuildPreservesCodeServerErrorOutputAndDeferredCleanup(t *testing.T) {
 	runtime := &recordingRuntime{
 		available: true,
 		scriptResponses: []runtimeResponse{
@@ -168,14 +166,13 @@ func TestBuildPreservesErrorOutputAndDeferredCleanup(t *testing.T) {
 	builder := NewBuilder(
 		runtime,
 		&recordingProfileSource{profiles: configuredProfiles()},
-		"browser-install",
 		[]byte("code-server-install"),
 		nil,
 	)
 	builder.networkWarmup = 0
 
 	err := builder.Build(context.Background(), "custom-alias")
-	wantErr := "agent browser install script: exit 1; output: ..." + strings.Repeat("x", 2000)
+	wantErr := "code-server install script: exit 1; output: ..." + strings.Repeat("x", 2000)
 	if err == nil || err.Error() != wantErr {
 		t.Fatalf("Build error = %v, want %q", err, wantErr)
 	}
@@ -189,7 +186,6 @@ func TestBuildUnavailablePreservesErrorAndDoesNotMutateRuntime(t *testing.T) {
 	builder := NewBuilder(
 		runtime,
 		&recordingProfileSource{profiles: configuredProfiles()},
-		"browser-install",
 		[]byte("code-server-install"),
 		nil,
 	)
@@ -229,7 +225,6 @@ func TestBuildWaitsForIPv4EgressInsteadOfFailingOnABootingContainer(t *testing.T
 	builder := NewBuilder(
 		runtime,
 		&recordingProfileSource{profiles: configuredProfiles()},
-		"browser-install",
 		[]byte("code-server-install"),
 		nil,
 	)
@@ -249,7 +244,7 @@ func TestBuildWaitsForIPv4EgressInsteadOfFailingOnABootingContainer(t *testing.T
 	if probes != 3 {
 		t.Fatalf("egress probes = %d, want 3 (two failures then success)", probes)
 	}
-	if !strings.Contains(strings.Join(runtime.events, "\n"), "browser-install") {
+	if !strings.Contains(strings.Join(runtime.events, "\n"), "code-server-install") {
 		t.Fatalf("build did not continue past the probe: %q", runtime.events)
 	}
 }
@@ -262,7 +257,6 @@ func TestWaitForIPv4EgressStopsWhenTheBuildIsCanceled(t *testing.T) {
 	builder := NewBuilder(
 		runtime,
 		&recordingProfileSource{profiles: configuredProfiles()},
-		"browser-install",
 		[]byte("code-server-install"),
 		nil,
 	)
