@@ -53,8 +53,8 @@ flowchart TB
 - The Go backend is **one process, bound to loopback** (`HOST=127.0.0.1:7682`, [`backend/internal/config/config.go`](backend/internal/config/config.go)). Caddy is the only thing listening on the public interface.
 - The backend runs as **root** ([`infra/templates/remote.futrx.service.tmpl`](infra/templates/remote.futrx.service.tmpl), `User=root`) because it drives the `lxc` CLI and chowns workspace files into the container idmap. This is a deliberate design choice with security consequences — see the [threat model](docs/threat-model.md).
 - There is **no database.** All platform state is flat files under `DATA_DIR` (`/opt/remote.futrx/data`): JSON for auth/users/projects/access/secrets, append-only JSONL for chat event logs. Concurrency is guarded by in-process mutexes only.
-- Each project is **one unprivileged LXD container** built from a shared base image (`futrx-remote-dev-base`: Ubuntu 24.04 + Node 22 + pinned agent CLIs + code-server, with legacy browser packages retained for rollback). Durable state lives on the host and is bind-mounted in.
-- Agent Browser uses **one host Chromium process tree** and one isolated Playwright `BrowserContext` per active project. Cookies, local storage, IndexedDB, tabs, downloads, and MCP sessions are project-scoped; encrypted storage state survives context and container restarts.
+- Each project is **one unprivileged LXD container** built from a shared base image (`futrx-remote-dev-base`: Ubuntu 24.04 + Node 22 + pinned agent CLIs + code-server, without a browser/VNC stack). Durable state lives on the host and is bind-mounted in.
+- Agent Browser uses **one host Chromium process tree** and one isolated Playwright `BrowserContext` per active project. The broker launches headed Chromium directly and attaches Playwright over an ephemeral loopback-only CDP endpoint, rather than applying Playwright's automation launch arguments. Cookies, local storage, IndexedDB, tabs, downloads, and MCP sessions are project-scoped; encrypted storage state survives context and container restarts.
 
 ## The four public host classes
 
@@ -285,7 +285,7 @@ Three browser-facing capabilities attach to each project ([deep dive](docs/03-pl
 
 - **App previews:** the backend runs `ss` inside the container to discover listening ports ([`listeners/scanner.go`](backend/internal/integration/containers/listeners/scanner.go), loopback binds excluded), and each becomes a `<slug>--<port>.dev.<host>` URL. No per-app proxy config is written — DNS + Caddy regex do the routing.
 - **Per-project IDE:** a pinned code-server listens on `127.0.0.1:8081` with `auth: none`, reachable only through a socket-activated proxy on `:8842` that scales to zero when idle. Authentication is entirely at the Caddy edge.
-- **Agent Browser:** a host broker lazily starts one sandboxed, headed Chromium on one Xvfb display and allocates an isolated `BrowserContext` per active project. The Browser drawer renders that context through an authenticated CDP screencast WebSocket; Claude, Codex, and MiniMax receive a project-scoped Streamable HTTP MCP credential. Human and agent operate the same project tabs, while other projects have separate cookies and storage without duplicating the Chromium/Xvfb/noVNC stack.
+- **Agent Browser:** a host broker lazily starts one sandboxed, headed Chromium as a child of its systemd service, attaches Playwright through an ephemeral loopback-only CDP endpoint, and allocates an isolated `BrowserContext` per active project. The Browser drawer renders that context through an authenticated CDP screencast WebSocket; Claude, Codex, and MiniMax receive a project-scoped Streamable HTTP MCP credential. Human and agent operate the same project tabs, while other projects have separate cookies and storage without duplicating the Chromium/Xvfb/noVNC stack.
 
 ## Frontend
 

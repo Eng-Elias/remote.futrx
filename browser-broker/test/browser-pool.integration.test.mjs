@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { BrowserPool } from '../src/browser-pool.mjs';
+import { DirectChromiumLauncher } from '../src/direct-chromium.mjs';
 import { EncryptedStateStore } from '../src/state-store.mjs';
 
 const runBrowserIntegration = process.env.BROWSER_BROKER_INTEGRATION === '1';
@@ -15,9 +16,17 @@ test('one Chromium serves isolated project contexts and restores encrypted login
 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'remote-browser-integration-'));
   const stateStore = new EncryptedStateStore(root, randomBytes(48));
-  const pool = new BrowserPool({ stateStore, idleBrowserMs: 10 });
+  const pool = new BrowserPool({
+    stateStore,
+    idleBrowserMs: 10,
+    launcher: new DirectChromiumLauncher({
+      runtimeDir: path.join(root, 'runtime'),
+      chromiumSandbox: process.getuid?.() !== 0,
+    }),
+  });
   try {
     const alpha = await pool.ensure('alpha');
+    assert.equal(await alpha.context.pages()[0].evaluate(() => navigator.webdriver), false);
     const browser = pool.browser;
     const beta = await pool.ensure('beta');
     assert.equal(pool.browser, browser);

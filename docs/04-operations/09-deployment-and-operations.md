@@ -33,7 +33,7 @@ one convergence cannot mix policy from two commits.
 | --- | --- |
 | `/opt/remote.futrx` | Application checkout, built binary, frontend assets, infrastructure scripts, and data |
 | `remote.futrx.service` | Go backend on loopback port `7682` by default |
-| `remote.futrx-browser.service` | Dedicated unprivileged broker with one headed Chromium and isolated project BrowserContexts |
+| `remote.futrx-browser.service` | Dedicated unprivileged broker that directly launches one headed Chromium, attaches over loopback CDP, and owns isolated project BrowserContexts |
 | Caddy | Public HTTPS, compression, authentication, and proxy routing |
 | LXD | Project-container runtime and base-image store |
 | Catalog-declared host agent CLIs | Local binaries for host-scoped execution and managed authentication |

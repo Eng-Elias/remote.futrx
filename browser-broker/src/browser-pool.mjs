@@ -1,10 +1,10 @@
-import { chromium } from 'playwright';
+import { DirectChromiumLauncher } from './direct-chromium.mjs';
 import { ProjectNetworkPolicy } from './network-policy.mjs';
 
 const defaultViewport = { width: 1280, height: 720 };
 
 export class BrowserPool {
-  constructor({ stateStore, idleBrowserMs = 30_000, maxContexts = 32, launcher = chromium } = {}) {
+  constructor({ stateStore, idleBrowserMs = 30_000, maxContexts = 32, launcher = new DirectChromiumLauncher() } = {}) {
     this.stateStore = stateStore;
     this.idleBrowserMs = idleBrowserMs;
     this.maxContexts = maxContexts;

@@ -8,6 +8,7 @@ import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { BrowserPool } from '../src/browser-pool.mjs';
+import { DirectChromiumLauncher } from '../src/direct-chromium.mjs';
 import { MCPRouter } from '../src/mcp-router.mjs';
 import { EncryptedStateStore } from '../src/state-store.mjs';
 
@@ -31,7 +32,13 @@ test('streamable HTTP MCP sessions are bound to separate project contexts', {
 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'remote-browser-mcp-'));
   const stateStore = new EncryptedStateStore(root, randomBytes(48));
-  const pool = new BrowserPool({ stateStore });
+  const pool = new BrowserPool({
+    stateStore,
+    launcher: new DirectChromiumLauncher({
+      runtimeDir: path.join(root, 'runtime'),
+      chromiumSandbox: process.getuid?.() !== 0,
+    }),
+  });
   const router = new MCPRouter(pool, { outputRoot: path.join(root, 'output') });
   const server = http.createServer((request, response) => {
     const project = request.headers['x-test-project'];

@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import WebSocket, { WebSocketServer } from 'ws';
 import { BrowserPool } from '../src/browser-pool.mjs';
+import { DirectChromiumLauncher } from '../src/direct-chromium.mjs';
 import { EncryptedStateStore } from '../src/state-store.mjs';
 import { ViewSession } from '../src/view-session.mjs';
 
@@ -28,6 +29,10 @@ test('live view streams frames and relays human input to the project page', {
   const root = await mkdtemp(path.join(os.tmpdir(), 'remote-browser-view-'));
   const pool = new BrowserPool({
     stateStore: new EncryptedStateStore(root, randomBytes(48)),
+    launcher: new DirectChromiumLauncher({
+      runtimeDir: path.join(root, 'runtime'),
+      chromiumSandbox: process.getuid?.() !== 0,
+    }),
   });
   const record = await pool.ensure('alpha', { view: true });
   const page = record.context.pages()[0];
@@ -37,8 +42,12 @@ test('live view streams frames and relays human input to the project page', {
     <script>
       window.clicked = false;
       window.entered = false;
+      window.inputTrust = [];
       document.querySelector('button').onclick = () => { window.clicked = true; };
       document.addEventListener('keydown', event => { if (event.key === 'Enter') window.entered = true; });
+      for (const type of ['keydown', 'keyup', 'mousedown', 'mouseup']) {
+        document.addEventListener(type, event => window.inputTrust.push(event.isTrusted), true);
+      }
     </script>
   `);
   await page.locator('input').focus();
@@ -61,6 +70,10 @@ test('live view streams frames and relays human input to the project page', {
     client.send(JSON.stringify({ type: 'insertText', text: 'separate-alpha-input' }));
     await eventually(async () => await page.locator('input').inputValue() === 'separate-alpha-input');
 
+    client.send(JSON.stringify({ type: 'key', eventType: 'keyDown', key: 'a', code: 'KeyA', text: 'a' }));
+    client.send(JSON.stringify({ type: 'key', eventType: 'keyUp', key: 'a', code: 'KeyA' }));
+    await eventually(async () => await page.locator('input').inputValue() === 'separate-alpha-inputa');
+
     client.send(JSON.stringify({ type: 'key', eventType: 'keyDown', key: 'Enter', code: 'Enter' }));
     client.send(JSON.stringify({ type: 'key', eventType: 'keyUp', key: 'Enter', code: 'Enter' }));
     await eventually(() => page.evaluate(() => window.entered));
@@ -68,6 +81,7 @@ test('live view streams frames and relays human input to the project page', {
     client.send(JSON.stringify({ type: 'mouse', eventType: 'mousePressed', x: 20, y: 20, button: 'left', buttons: 1, clickCount: 1 }));
     client.send(JSON.stringify({ type: 'mouse', eventType: 'mouseReleased', x: 20, y: 20, button: 'left', buttons: 0, clickCount: 1 }));
     await eventually(() => page.evaluate(() => window.clicked));
+    assert.equal(await page.evaluate(() => window.inputTrust.length >= 6 && window.inputTrust.every(Boolean)), true);
 
     await page.close();
     await eventually(() => record.context.pages().length === 0);

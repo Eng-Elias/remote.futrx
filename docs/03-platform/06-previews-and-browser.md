@@ -73,6 +73,11 @@ flowchart TB
 The user can sign in visually while the agent controls the same project tabs.
 BrowserContexts isolate cookies, local storage, IndexedDB, cache, permissions,
 and pages between projects while sharing Chromium's fixed process overhead.
+The broker starts the Chrome executable directly inside its systemd cgroup and
+then attaches Playwright over an ephemeral `127.0.0.1` CDP port. The visited
+page never renders into Remote's canvas—the canvas only displays CDP
+screencast frames—and Chromium is not started with Playwright's automation
+launch arguments. Raw CDP remains inaccessible to project containers.
 Storage state is encrypted on the host and restored when a context starts, so
 site logins survive context, container, and backend replacement. Existing
 legacy Chrome profiles are retained for rollback but are not imported into the
@@ -102,7 +107,7 @@ Frontend behavior:
 
 Backend behavior:
 
-- Starting the browser first ensures the project container is running, then asks the separately supervised host broker for that project's context.
+- Starting the browser first ensures the project container is running, then asks the separately supervised host broker for that project's context. The broker launches Chromium directly on demand and attaches over its private loopback CDP endpoint.
 - Installation places Chromium and the broker on the host once; project starts publish only the agent skill and remote MCP configuration.
 - A selected `browser` skill injects a per-run, project-scoped MCP URL/token pair into that agent process. Raw CDP is not exposed to containers.
 - Active browser-enabled prompts send a keepalive every minute.
