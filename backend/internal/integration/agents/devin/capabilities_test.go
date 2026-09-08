@@ -66,6 +66,64 @@ func TestParseModelCatalogFromObjectWithModels(t *testing.T) {
 	}
 }
 
+func TestParseModelCatalogFromDevinNativeFamilies(t *testing.T) {
+	caps, err := parseModelCatalog([]byte(`{
+		"families": [
+			{
+				"family_label": "Claude Opus 5",
+				"family_uid": "claude-opus-5",
+				"variants": [
+					{"model_uid": "claude-opus-5-medium", "label": "Claude Opus 5 Medium"},
+					{"model_uid": "claude-opus-5-low", "label": "Claude Opus 5 Low"}
+				]
+			},
+			{
+				"family_label": "GPT-5.2",
+				"family_uid": "gpt-5.2",
+				"variants": [
+					{"model_uid": "MODEL_GPT_5_2_NONE", "label": "GPT-5.2 No Thinking"}
+				]
+			}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caps.Source != agent.CapabilitySourceLive {
+		t.Fatalf("source = %q, want live", caps.Source)
+	}
+	// Auto + 3 models = 4
+	if len(caps.Models) != 4 {
+		t.Fatalf("models = %#v, want 4 (auto + 3)", caps.Models)
+	}
+	// Sorted by ID: MODEL_GPT_5_2_NONE, claude-opus-5-low, claude-opus-5-medium
+	if caps.Models[1].ID != "MODEL_GPT_5_2_NONE" || caps.Models[1].Label != "GPT-5.2 No Thinking" {
+		t.Fatalf("first model = %#v", caps.Models[1])
+	}
+	if caps.Models[2].ID != "claude-opus-5-low" || caps.Models[2].Label != "Claude Opus 5 Low" {
+		t.Fatalf("second model = %#v", caps.Models[2])
+	}
+	if caps.Models[3].ID != "claude-opus-5-medium" || caps.Models[3].Label != "Claude Opus 5 Medium" {
+		t.Fatalf("third model = %#v", caps.Models[3])
+	}
+}
+
+func TestParseModelCatalogFromFamiliesWithEmptyVariants(t *testing.T) {
+	caps, err := parseModelCatalog([]byte(`{
+		"families": [
+			{"family_label": "Empty", "variants": []},
+			{"family_label": "Also Empty", "variants": null}
+		]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No models found — should return auto-only (fallback through empty path)
+	if len(caps.Models) != 1 || caps.Models[0].ID != "" {
+		t.Fatalf("models = %#v, want only auto model", caps.Models)
+	}
+}
+
 func TestParseModelCatalogFromObjectWithData(t *testing.T) {
 	caps, err := parseModelCatalog([]byte(`{
 		"data": [

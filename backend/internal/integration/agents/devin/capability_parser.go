@@ -10,17 +10,22 @@ import (
 )
 
 // parseModelCatalog parses the output of `devin models list --format json` into
-// agent.Capabilities. The exact JSON shape requires authentication to observe
-// (see Phase 0.5 of the plan), so this parser handles common shapes
-// conservatively and falls back gracefully.
+// agent.Capabilities. The authenticated Devin CLI returns a nested structure:
+//
+//   {"families":[{"family_label":"...","variants":[{"model_uid":"...","label":"..."}]}]}
+//
+// This parser also handles simpler flat shapes conservatively and falls back
+// gracefully when the output is empty or unparseable.
 //
 // Supported shapes:
+//   - Devin native: {"families":[{"variants":[...]}]} with model_uid/label fields
 //   - Array of model objects: [{"id":"...","name":"..."}, ...]
 //   - Object with "models" array: {"models":[...], "default":"..."}
 //   - Object with "data" array: {"data":[...]}
 //
 // Each model object may use any of these field names for its identifier:
-// id, name, model, value. For its display label: name, displayName, label, title.
+// id, name, model, value, model_uid. For its display label: name, displayName,
+// label, title.
 func parseModelCatalog(raw []byte) (agent.Capabilities, error) {
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return fallbackCapabilities(), nil
@@ -85,6 +90,17 @@ func extractModels(raw []byte) ([]agent.ModelCapability, string, error) {
 		}
 	}
 
+	// Try Devin native shape: {"families":[{"variants":[...]}]}
+	if rawFamilies, ok := root["families"]; ok && len(rawFamilies) > 0 && string(rawFamilies) != "null" {
+		var families []map[string]json.RawMessage
+		if err := json.Unmarshal(rawFamilies, &families); err == nil && len(families) > 0 {
+			models := parseFamilyVariants(families, defaultID)
+			if len(models) > 0 {
+				return models, defaultID, nil
+			}
+		}
+	}
+
 	// No models found — return empty (caller will use auto model).
 	return nil, defaultID, nil
 }
@@ -97,7 +113,7 @@ func parseModelItems(items []json.RawMessage, defaultID string) []agent.ModelCap
 		if json.Unmarshal(item, &obj) != nil {
 			continue
 		}
-		id := rawString(obj, "id", "name", "model", "value")
+		id := rawString(obj, "id", "name", "model", "value", "model_uid")
 		id = strings.TrimSpace(id)
 		if id == "" || seen[id] {
 			continue
@@ -117,6 +133,24 @@ func parseModelItems(items []json.RawMessage, defaultID string) []agent.ModelCap
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models
+}
+
+// parseFamilyVariants extracts models from Devin's native nested shape:
+// {"families":[{"variants":[{"model_uid":"...","label":"..."}]}]}.
+func parseFamilyVariants(families []map[string]json.RawMessage, defaultID string) []agent.ModelCapability {
+	var allItems []json.RawMessage
+	for _, family := range families {
+		rawVariants, ok := family["variants"]
+		if !ok || len(rawVariants) == 0 || string(rawVariants) == "null" {
+			continue
+		}
+		var variants []json.RawMessage
+		if json.Unmarshal(rawVariants, &variants) != nil {
+			continue
+		}
+		allItems = append(allItems, variants...)
+	}
+	return parseModelItems(allItems, defaultID)
 }
 
 func rawString(obj map[string]json.RawMessage, keys ...string) string {
