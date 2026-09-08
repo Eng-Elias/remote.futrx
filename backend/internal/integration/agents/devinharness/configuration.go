@@ -61,6 +61,6 @@ curl -fsSL "$url" -o "$tmp/devin.tar.gz"
 echo "${sha256}  $tmp/devin.tar.gz" | sha256sum -c - >/dev/null
 tar -xzf "$tmp/devin.tar.gz" -C "$tmp"
 install -d -m 0755 "$(dirname "$install_path")"
-install -m 0755 "$tmp/devin" "$install_path"
+install -m 0755 "$tmp/bin/devin" "$install_path"
 "$install_path" --version`, version, manifestBaseURL)
 }
