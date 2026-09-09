@@ -10,9 +10,9 @@ import (
 	"github.com/futrx-com/remote.futrx.com/internal/agent"
 )
 
-// TestRunACPSuccessfulTurn tests a complete ACP turn: initialize → authenticate
-// → session/new → session/prompt → session/update notifications → prompt
-// response with stopReason end_turn.
+// TestRunACPSuccessfulTurn tests a complete ACP turn: initialize → session/new
+// → session/prompt → session/update notifications → prompt response with
+// stopReason end_turn.
 func TestRunACPSuccessfulTurn(t *testing.T) {
 	script := `
 while IFS= read -r line; do
@@ -20,20 +20,14 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"notifications/initialized"'*)
-      # no response expected
-      ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-1"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-1"}}'
       ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello!"},"messageId":"msg-1"}}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Bash","status":"inProgress","rawInput":{"command":"echo hi"}}}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","content":{"type":"text","text":"hi"}}}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
       ;;
   esac
 done`
@@ -113,15 +107,12 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/resume"'*)
       case "$line" in *'"sessionId":"existing-sess"'*) ;; *) exit 1 ;; esac
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"existing-sess"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"existing-sess"}}'
       ;;
     *'"method":"session/prompt"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
       ;;
   esac
 done`
@@ -170,11 +161,8 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-cancel"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-cancel"}}'
       ;;
     *'"method":"session/prompt"'*)
       # Send a notification, then wait for the cancel notification
@@ -182,7 +170,7 @@ while IFS= read -r line; do
       # Wait for cancel
       ;;
     *'"method":"session/cancel"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"cancelled"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}'
       ;;
   esac
 done`
@@ -223,39 +211,6 @@ done`
 	}
 }
 
-// TestRunACPAuthFailure tests that an authenticate error is propagated.
-func TestRunACPAuthFailure(t *testing.T) {
-	script := `
-while IFS= read -r line; do
-  case "$line" in
-    *'"method":"initialize"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
-      ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"authentication failed"}}'
-      ;;
-  esac
-done`
-
-	err := Run(
-		context.Background(),
-		exec.Command("sh", "-c", script),
-		agent.RunRequest{
-			Provider:       agent.ProviderDevin,
-			ConversationID: "chat-1",
-			Prompt:         "hello",
-		},
-		"Devin",
-		func(event agent.Event) {},
-	)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "authentication failed") {
-		t.Fatalf("error = %q, want it to contain 'authentication failed'", err.Error())
-	}
-}
-
 // TestRunACPRefusal tests that stopReason "refusal" produces EventRunFailed.
 func TestRunACPRefusal(t *testing.T) {
 	script := `
@@ -264,14 +219,11 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-refuse"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-refuse"}}'
       ;;
     *'"method":"session/prompt"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"refusal"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"refusal"}}'
       ;;
   esac
 done`
@@ -315,17 +267,14 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-unk"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-unk"}}'
       ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"_cognition.ai/output","params":{"message":"MCP log"}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"_cognition.ai/customEvent","params":{"data":true}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-unk","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"response"},"messageId":"msg-1"}}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
       ;;
   esac
 done`
@@ -415,11 +364,8 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-1,"message":"Invalid params: missing field mcpServers"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"Invalid params: missing field mcpServers"}}'
       ;;
   esac
 done`
@@ -451,14 +397,11 @@ while IFS= read -r line; do
     *'"method":"initialize"'*)
       printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
     *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-max"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-max"}}'
       ;;
     *'"method":"session/prompt"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"max_tokens"}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"max_tokens"}}'
       ;;
   esac
 done`
@@ -486,28 +429,18 @@ done`
 		}
 	}
 	if !foundCompletion {
-		t.Fatal("max_tokens should produce run completed")
+		t.Fatal("missing run completed event for max_tokens")
 	}
 }
 
-// TestRunACPProcessClosesEarly tests that the harness reports an error when the
-// process exits before the turn completes.
-func TestRunACPProcessClosesEarly(t *testing.T) {
+// TestRunACPNoAuthMethods tests that an initialize response without
+// authMethods is treated as an error.
+func TestRunACPNoAuthMethods(t *testing.T) {
 	script := `
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
-      ;;
-    *'"method":"authenticate"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
-      ;;
-    *'"method":"session/new"'*)
-      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"sess-early"}}'
-      ;;
-    *'"method":"session/prompt"'*)
-      # Just exit without sending the prompt response
-      exit 0
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
       ;;
   esac
 done`
@@ -524,9 +457,44 @@ done`
 		func(event agent.Event) {},
 	)
 	if err == nil {
-		t.Fatal("expected error for early process exit, got nil")
+		t.Fatal("expected error for empty authMethods, got nil")
 	}
-	if !strings.Contains(err.Error(), "closed before the turn completed") {
-		t.Fatalf("error = %q, want it to mention 'closed before the turn completed'", err.Error())
+	if !strings.Contains(err.Error(), "no auth methods") {
+		t.Fatalf("error = %q, want it to contain 'no auth methods'", err.Error())
+	}
+}
+
+// TestRunACPSessionMissing tests that a session/resume error for a missing
+// session returns agent.ErrSessionNotFound.
+func TestRunACPSessionMissing(t *testing.T) {
+	script := `
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"devin-browser","name":"Log in with browser"}],"agentInfo":{"name":"affogato","title":"Devin Agent","version":"0.0.0-dev"}}}'
+      ;;
+    *'"method":"session/resume"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"session not found: no such session"}}'
+      ;;
+  esac
+done`
+
+	err := Run(
+		context.Background(),
+		exec.Command("sh", "-c", script),
+		agent.RunRequest{
+			Provider:       agent.ProviderDevin,
+			ConversationID: "chat-1",
+			Prompt:         "continue",
+			ResumeID:       "missing-sess",
+		},
+		"Devin",
+		func(event agent.Event) {},
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), agent.ErrSessionNotFound.Error()) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), agent.ErrSessionNotFound.Error())
 	}
 }

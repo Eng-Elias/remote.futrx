@@ -36,7 +36,6 @@ type acpRun struct {
 	requestHandler *acpRequestHandler
 
 	sessionID       string
-	authMethodID    string
 	cancelRequested bool
 	cancelSent      bool
 	terminal        bool
@@ -103,9 +102,16 @@ func (run *acpRun) start() error {
 	return nil
 }
 
-// handshake performs the synchronous initialize → authenticate → session/new
-// (or session/resume) exchange before the prompt is sent. Each step waits for
-// its response on the stdout scanner.
+// handshake performs the synchronous initialize → session/new (or
+// session/resume) exchange before the prompt is sent. Each step waits for its
+// response on the stdout scanner.
+//
+// Devin's ACP server loads credentials from disk on startup (the credential
+// policy log says "Will accept host credentials if provided, otherwise fall
+// back to env vars and stored CLI credentials"), so the authenticate step is
+// not needed when the host has already run `devin auth login`. The
+// notifications/initialized notification is also skipped because Devin's ACP
+// server does not implement it (returns "Method not found").
 func (run *acpRun) handshake() error {
 	// Step 1: initialize
 	if err := run.process.write(buildInitialize()); err != nil {
@@ -119,20 +125,7 @@ func (run *acpRun) handshake() error {
 		return err
 	}
 
-	// Step 2: notifications/initialized
-	if err := run.process.write(buildInitialized()); err != nil {
-		return fmt.Errorf("send initialized: %w", err)
-	}
-
-	// Step 3: authenticate
-	if err := run.process.write(buildAuthenticate(run.authMethodID)); err != nil {
-		return fmt.Errorf("send authenticate: %w", err)
-	}
-	if _, err := run.waitForResponse(acpAuthenticateRequestID); err != nil {
-		return fmt.Errorf("authenticate: %w", err)
-	}
-
-	// Step 4: session/new or session/resume
+	// Step 2: session/new or session/resume
 	if run.req.ResumeID != "" {
 		if err := run.process.write(buildSessionResume(run.req)); err != nil {
 			return fmt.Errorf("send session/resume: %w", err)
@@ -153,7 +146,7 @@ func (run *acpRun) handshake() error {
 		return err
 	}
 
-	// Step 5: session/prompt
+	// Step 3: session/prompt
 	if err := run.process.write(buildSessionPrompt(run.sessionID, run.req.Prompt)); err != nil {
 		return fmt.Errorf("send session/prompt: %w", err)
 	}
@@ -215,10 +208,13 @@ func (run *acpRun) parseInitializeResult(result json.RawMessage) error {
 	}
 	// The agent may respond with a lower protocol version (confirmed v1).
 	// Accept whatever the agent returns.
+	//
+	// Devin's ACP server loads credentials from disk on startup, so the
+	// authenticate step is not needed. We still verify authMethods is present
+	// as a sanity check that the server initialized correctly.
 	if len(initResult.AuthMethods) == 0 {
 		return fmt.Errorf("%s ACP server returned no auth methods", run.providerLabel)
 	}
-	run.authMethodID = initResult.AuthMethods[0].ID
 	return nil
 }
 

@@ -159,21 +159,6 @@ func TestACPInitializeResultAcceptsProtocolVersion1(t *testing.T) {
 	}
 }
 
-func TestACPAuthenticateParamsRoundTrip(t *testing.T) {
-	params := acpAuthenticateParams{MethodID: "devin-browser"}
-	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded acpAuthenticateParams
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.MethodID != "devin-browser" {
-		t.Fatalf("methodId = %q", decoded.MethodID)
-	}
-}
-
 func TestACPSessionNewParamsRoundTrip(t *testing.T) {
 	params := acpSessionNewParams{
 		Cwd:        "/workspace",

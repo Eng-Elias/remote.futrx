@@ -85,12 +85,6 @@ type acpInitializeResult struct {
 	AgentInfo        acpAgentInfo        `json:"agentInfo"`
 }
 
-// ── authenticate ──
-
-type acpAuthenticateParams struct {
-	MethodID string `json:"methodId"`
-}
-
 // ── session/new and session/resume ──
 
 type acpSessionNewParams struct {

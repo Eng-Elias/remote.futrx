@@ -14,7 +14,6 @@ type acpRequestID int
 
 const (
 	acpInitializeRequestID acpRequestID = iota + 1
-	acpAuthenticateRequestID
 	acpSessionRequestID
 	acpPromptRequestID
 )
@@ -45,28 +44,6 @@ func buildInitialize() map[string]any {
 				Version: clientVersion,
 			},
 		},
-	}
-}
-
-// buildInitialized constructs the notifications/initialized notification that
-// must follow the initialize response.
-func buildInitialized() map[string]any {
-	return map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "notifications/initialized",
-	}
-}
-
-// buildAuthenticate constructs the authenticate request. The ACP server does
-// not read on-disk credentials; the client must call authenticate with the
-// methodId from the initialize response's authMethods (confirmed "devin-browser"
-// by live traffic).
-func buildAuthenticate(methodID string) map[string]any {
-	return map[string]any{
-		"jsonrpc": "2.0",
-		"id":      acpAuthenticateRequestID,
-		"method":  "authenticate",
-		"params":  acpAuthenticateParams{MethodID: methodID},
 	}
 }
 
