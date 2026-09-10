@@ -25,6 +25,10 @@ type acpRequestHandler struct {
 type acpPendingRequest struct {
 	envelope  acpEnvelope
 	createdAt time.Time
+	// permissionOptions stores the optionId values from session/request_permission
+	// so the UI's generic grant/deny response can be mapped back to Devin's
+	// expected outcome format.
+	permissionOptions []acpPermissionOption
 }
 
 func newACPRequestHandler(
@@ -52,14 +56,32 @@ func (handler *acpRequestHandler) Handle(envelope acpEnvelope) error {
 		return fmt.Errorf("duplicate ACP request %s", requestID)
 	}
 
-	handler.pending[requestID] = acpPendingRequest{envelope: envelope, createdAt: time.Now()}
+	pending := acpPendingRequest{envelope: envelope, createdAt: time.Now()}
+
+	// For session/request_permission, translate Devin's native options into
+	// the provider-neutral format the UI's PermissionInteractionForm expects.
+	// The UI looks for a "permissions" field to render the grant/deny buttons.
+	var uiInput json.RawMessage
+	if envelope.Method == "session/request_permission" {
+		var params acpRequestPermissionParams
+		if err := json.Unmarshal(envelope.Params, &params); err == nil {
+			pending.permissionOptions = params.Options
+			uiInput = translatePermissionParams(envelope.Params, params)
+		} else {
+			uiInput = cloneRaw(envelope.Params)
+		}
+	} else {
+		uiInput = cloneRaw(envelope.Params)
+	}
+
+	handler.pending[requestID] = pending
 	handler.emit(agent.Event{
 		T:              time.Now().UnixMilli(),
 		Type:           agent.EventInteractionRequest,
 		Provider:       handler.req.Provider,
-		ConversationID: handler.req.ConversationID,
+		ConversationID:  handler.req.ConversationID,
 		ToolName:       envelope.Method,
-		Input:          cloneRaw(envelope.Params),
+		Input:          uiInput,
 		InteractionID:  requestID,
 		Status:         interactionKind(envelope.Method),
 		Native: &agent.NativeEnvelope{
@@ -94,6 +116,16 @@ func (handler *acpRequestHandler) Respond(response agent.InteractionResponse) er
 		}
 		if !json.Valid(result) {
 			return errors.New("invalid JSON-RPC interaction result")
+		}
+		// For session/request_permission, translate the UI's generic
+		// grant_permissions/deny_permissions response into Devin's expected
+		// outcome format with the matching optionId.
+		if request.Method == "session/request_permission" {
+			translated, err := translatePermissionResult(result, pending.permissionOptions)
+			if err != nil {
+				return err
+			}
+			result = translated
 		}
 		wire["result"] = json.RawMessage(result)
 	}
@@ -191,4 +223,94 @@ func interactionResponseStatus(method string, result, responseError json.RawMess
 		}
 	}
 	return "answered"
+}
+
+// translatePermissionParams converts Devin's session/request_permission
+// params into the provider-neutral format the UI's PermissionInteractionForm
+// expects. The UI looks for a "permissions" field to render grant/deny buttons.
+func translatePermissionParams(raw json.RawMessage, params acpRequestPermissionParams) json.RawMessage {
+	// Build a UI-friendly input that includes the original fields plus a
+	// "permissions" field so the PermissionInteractionForm renders correctly.
+	var base map[string]json.RawMessage
+	if json.Unmarshal(raw, &base) != nil {
+		base = make(map[string]json.RawMessage)
+	}
+	// Extract tool call info for display.
+	var toolCall map[string]json.RawMessage
+	if json.Unmarshal(params.ToolCall, &toolCall) == nil {
+		for k, v := range toolCall {
+			if k == "_meta" {
+				base["reason"] = v
+			}
+		}
+	}
+	// Add a non-empty permissions object so the UI form renders.
+	base["permissions"] = json.RawMessage(`{"tool":true}`)
+	encoded, err := json.Marshal(base)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+// translatePermissionResult converts the UI's generic grant_permissions /
+// deny_permissions response into Devin's expected ACP v1 format.
+//
+// The ACP schema uses:
+//   struct RequestPermissionResponse { outcome: RequestPermissionOutcome }
+//   #[serde(tag = "outcome", rename_all = "snake_case")]
+//   enum RequestPermissionOutcome { Cancelled, Selected(SelectedPermissionOutcome) }
+//
+// So the wire format is:
+//   {"outcome": {"outcome": "selected", "optionId": "allow_once"}}
+//   {"outcome": {"outcome": "cancelled"}}
+func translatePermissionResult(uiResult json.RawMessage, options []acpPermissionOption) (json.RawMessage, error) {
+	var uiResponse struct {
+		Permissions json.RawMessage `json:"permissions"`
+		Scope       string          `json:"scope"`
+	}
+	if err := json.Unmarshal(uiResult, &uiResponse); err != nil {
+		// Not a grant_permissions response — pass through as-is.
+		return uiResult, nil
+	}
+
+	// If permissions is empty/null, the user denied.
+	if len(uiResponse.Permissions) == 0 || string(uiResponse.Permissions) == "null" || string(uiResponse.Permissions) == "{}" {
+		return json.Marshal(acpPermissionResult{
+			Outcome: acpPermissionOutcome{Outcome: "cancelled"},
+		})
+	}
+
+	// User granted — map scope to the appropriate option.
+	var optionID string
+	if uiResponse.Scope == "session" {
+		optionID = findOptionID(options, "allow_session")
+		if optionID == "" {
+			optionID = findOptionID(options, "allow_always")
+		}
+	} else {
+		optionID = findOptionID(options, "allow_once")
+		if optionID == "" {
+			optionID = findOptionID(options, "allow")
+		}
+	}
+	if optionID == "" && len(options) > 0 {
+		optionID = options[0].OptionID
+	}
+	if optionID == "" {
+		optionID = "allow_once"
+	}
+	return json.Marshal(acpPermissionResult{
+		Outcome: acpPermissionOutcome{Outcome: "selected", OptionID: optionID},
+	})
+}
+
+// findOptionID searches for an option whose optionId contains the given substring.
+func findOptionID(options []acpPermissionOption, contains string) string {
+	for _, opt := range options {
+		if strings.Contains(opt.OptionID, contains) {
+			return opt.OptionID
+		}
+	}
+	return ""
 }

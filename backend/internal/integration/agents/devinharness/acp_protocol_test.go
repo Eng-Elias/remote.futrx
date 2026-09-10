@@ -254,7 +254,7 @@ func TestACPRequestPermissionParamsRoundTrip(t *testing.T) {
 	raw := json.RawMessage(`{
 		"sessionId":"s-1",
 		"toolCall":{"toolCallId":"tc-1","title":"Bash","status":"pending"},
-		"options":[{"outcome":"allow","title":"Allow"},{"outcome":"deny","title":"Deny"}]
+		"options":[{"optionId":"allow_once","name":"Allow","kind":"allow_once"},{"optionId":"reject_once","name":"Deny","kind":"reject_once"}]
 	}`)
 	var params acpRequestPermissionParams
 	if err := json.Unmarshal(raw, &params); err != nil {
@@ -266,8 +266,84 @@ func TestACPRequestPermissionParamsRoundTrip(t *testing.T) {
 	if len(params.Options) != 2 {
 		t.Fatalf("options = %#v", params.Options)
 	}
-	if params.Options[0].Outcome != "allow" || params.Options[1].Outcome != "deny" {
-		t.Fatalf("option outcomes = %#v", params.Options)
+	if params.Options[0].OptionID != "allow_once" || params.Options[1].OptionID != "reject_once" {
+		t.Fatalf("option ids = %#v", params.Options)
+	}
+}
+
+func TestACPPermissionResultRoundTrip(t *testing.T) {
+	result := acpPermissionResult{
+		Outcome: acpPermissionOutcome{Outcome: "selected", OptionID: "allow_once"},
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded acpPermissionResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Outcome.Outcome != "selected" || decoded.Outcome.OptionID != "allow_once" {
+		t.Fatalf("outcome = %q, optionId = %q", decoded.Outcome.Outcome, decoded.Outcome.OptionID)
+	}
+}
+
+func TestTranslatePermissionResultGrantTurn(t *testing.T) {
+	options := []acpPermissionOption{
+		{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"},
+		{OptionID: "allow_session", Name: "Yes, allow (this session)", Kind: "allow_always"},
+		{OptionID: "reject_once", Name: "Reject", Kind: "reject_once"},
+	}
+	uiResult := json.RawMessage(`{"permissions":{"tool":true},"scope":"turn"}`)
+	translated, err := translatePermissionResult(uiResult, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result acpPermissionResult
+	if err := json.Unmarshal(translated, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome.Outcome != "selected" || result.Outcome.OptionID != "allow_once" {
+		t.Fatalf("outcome = %q, optionId = %q, want selected/allow_once", result.Outcome.Outcome, result.Outcome.OptionID)
+	}
+}
+
+func TestTranslatePermissionResultGrantSession(t *testing.T) {
+	options := []acpPermissionOption{
+		{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"},
+		{OptionID: "allow_session", Name: "Yes, allow (this session)", Kind: "allow_always"},
+		{OptionID: "reject_once", Name: "Reject", Kind: "reject_once"},
+	}
+	uiResult := json.RawMessage(`{"permissions":{"tool":true},"scope":"session"}`)
+	translated, err := translatePermissionResult(uiResult, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result acpPermissionResult
+	if err := json.Unmarshal(translated, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome.Outcome != "selected" || result.Outcome.OptionID != "allow_session" {
+		t.Fatalf("outcome = %q, optionId = %q, want selected/allow_session", result.Outcome.Outcome, result.Outcome.OptionID)
+	}
+}
+
+func TestTranslatePermissionResultDeny(t *testing.T) {
+	options := []acpPermissionOption{
+		{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"},
+		{OptionID: "reject_once", Name: "Reject", Kind: "reject_once"},
+	}
+	uiResult := json.RawMessage(`{"permissions":{},"scope":"turn"}`)
+	translated, err := translatePermissionResult(uiResult, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result acpPermissionResult
+	if err := json.Unmarshal(translated, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome.Outcome != "cancelled" {
+		t.Fatalf("outcome = %q, want cancelled", result.Outcome.Outcome)
 	}
 }
 

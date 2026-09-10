@@ -166,15 +166,36 @@ type acpSessionUpdate struct {
 // ── session/request_permission (server-to-client request) ──
 
 type acpPermissionOption struct {
-	Outcome string `json:"outcome"`
-	Title   string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
+	OptionID string `json:"optionId"`
+	Name     string `json:"name,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 }
 
 type acpRequestPermissionParams struct {
-	SessionID string          `json:"sessionId"`
-	ToolCall  json.RawMessage `json:"toolCall"`
+	SessionID string                `json:"sessionId"`
+	ToolCall  json.RawMessage       `json:"toolCall"`
 	Options   []acpPermissionOption `json:"options"`
+}
+
+// acpPermissionResult is the response sent back to the ACP server. The
+// outcome field is the struct field of RequestPermissionResponse, and its
+// value is the internally-tagged enum RequestPermissionOutcome.
+//
+// ACP v1 schema:
+//   struct RequestPermissionResponse { outcome: RequestPermissionOutcome }
+//   #[serde(tag = "outcome", rename_all = "snake_case")]
+//   enum RequestPermissionOutcome { Cancelled, Selected(SelectedPermissionOutcome) }
+//
+// So the wire format is:
+//   {"outcome": {"outcome": "selected", "optionId": "allow_once"}}
+//   {"outcome": {"outcome": "cancelled"}}
+type acpPermissionResult struct {
+	Outcome acpPermissionOutcome `json:"outcome"`
+}
+
+type acpPermissionOutcome struct {
+	Outcome  string `json:"outcome"`
+	OptionID string `json:"optionId,omitempty"`
 }
 
 // ── session/elicitation/create (server-to-client request) ──
