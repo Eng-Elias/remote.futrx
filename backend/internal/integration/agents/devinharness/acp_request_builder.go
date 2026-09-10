@@ -25,6 +25,13 @@ const clientVersion = "0.1.0"
 // buildInitialize constructs the ACP initialize request. The client requests
 // protocol version 2; the agent may respond with a lower version (confirmed
 // v1 by live traffic — the harness accepts whatever the agent returns).
+//
+// FS capabilities are intentionally NOT declared. Devin runs inside the
+// container with direct filesystem access, so it does not need the host to
+// read or write files on its behalf. Declaring fs.readTextFile/fs.writeTextFile
+// causes Devin to send fs/read_text_file and fs/write_text_file host-tool
+// requests, which the harness has no handler for — they would surface as
+// generic JSON input prompts in the UI. Devin reads and writes files itself.
 func buildInitialize() map[string]any {
 	return map[string]any{
 		"jsonrpc": "2.0",
@@ -34,10 +41,6 @@ func buildInitialize() map[string]any {
 			ProtocolVersion: 2,
 			ClientCapabilities: acpClientCapabilities{
 				Elicitation: &acpElicitationCapability{},
-				FS: &acpFSCapability{
-					ReadTextFile:  true,
-					WriteTextFile: true,
-				},
 			},
 			ClientInfo: acpClientInfo{
 				Name:    "remote.futrx",

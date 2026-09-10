@@ -102,10 +102,6 @@ func TestACPInitializeParamsRoundTrip(t *testing.T) {
 		ProtocolVersion: 2,
 		ClientCapabilities: acpClientCapabilities{
 			Elicitation: &acpElicitationCapability{},
-			FS: &acpFSCapability{
-				ReadTextFile:  true,
-				WriteTextFile: true,
-			},
 		},
 		ClientInfo: acpClientInfo{
 			Name:    "remote.futrx",
@@ -126,11 +122,11 @@ func TestACPInitializeParamsRoundTrip(t *testing.T) {
 	if decoded.ClientInfo.Name != "remote.futrx" || decoded.ClientInfo.Version != "0.1.0" {
 		t.Fatalf("clientInfo = %#v", decoded.ClientInfo)
 	}
-	if decoded.ClientCapabilities.Elicitation == nil || decoded.ClientCapabilities.FS == nil {
+	if decoded.ClientCapabilities.Elicitation == nil {
 		t.Fatalf("capabilities = %#v", decoded.ClientCapabilities)
 	}
-	if !decoded.ClientCapabilities.FS.ReadTextFile || !decoded.ClientCapabilities.FS.WriteTextFile {
-		t.Fatalf("fs capability = %#v", decoded.ClientCapabilities.FS)
+	if decoded.ClientCapabilities.FS != nil {
+		t.Fatalf("fs capability should be nil, got %#v", decoded.ClientCapabilities.FS)
 	}
 }
 
