@@ -25,6 +25,155 @@ grep -Fq 'remote_exec_selected_installer "$INSTALL_DIR/infra/install.sh" "$@"' \
     "$TESTS_DIR/../steps/00-checkout.sh" || \
     fail "installer checkout step bypasses protected credential forwarding"
 
+# Production checkout selection must deploy a numeric release, not an
+# untagged main commit. When tags share a commit, the highest selected tag is
+# carried through re-exec so the backend can stamp it exactly.
+ORIGIN="$TEST_DIR/release-origin.git"
+SOURCE="$TEST_DIR/release-source"
+SELECTED_INSTALL="$TEST_DIR/release-install"
+git init --bare --quiet "$ORIGIN"
+git init --quiet "$SOURCE"
+git -C "$SOURCE" config user.name Test
+git -C "$SOURCE" config user.email test@example.com
+printf 'release\n' > "$SOURCE/source.txt"
+git -C "$SOURCE" add source.txt
+git -C "$SOURCE" commit --quiet -m release
+release_commit="$(git -C "$SOURCE" rev-parse HEAD)"
+git -C "$SOURCE" tag 0.21.0
+git -C "$SOURCE" tag 0.21.1
+printf 'unreleased\n' >> "$SOURCE/source.txt"
+git -C "$SOURCE" commit --quiet -am unreleased
+git -C "$SOURCE" branch -M main
+git -C "$SOURCE" remote add origin "$ORIGIN"
+git -C "$SOURCE" push --quiet origin main --tags
+git --git-dir="$ORIGIN" symbolic-ref HEAD refs/heads/main
+(
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_INSTALL_CHECKOUT_SELECTED
+    unset FUTRX_CHECKOUT_REF GITHUB_TOKEN GOOGLE_CLIENT_SECRET
+    # shellcheck source=../install.sh
+    . "$INSTALL_SCRIPT"
+    remote_load_configuration
+    INSTALL_DIR="$SELECTED_INSTALL"
+    REPO_URL="$ORIGIN"
+    selected_state="$TEST_DIR/release-selected-state"
+    remote_replace_process() {
+        printf '%s\n%s\n' \
+            "$FUTRX_CHECKOUT_REF" \
+            "$(git -C "$INSTALL_DIR" rev-parse HEAD)" > "$selected_state"
+    }
+
+    remote_select_checkout remote.example.com --skip-dns-check
+)
+mapfile -t selected_state < "$TEST_DIR/release-selected-state"
+[ "${selected_state[0]}" = "0.21.1" ] ||
+    fail "production checkout did not select the highest release tag"
+[ "${selected_state[1]}" = "$release_commit" ] ||
+    fail "production checkout followed untagged main instead of the release"
+
+# A full update without --ref follows the same release-only policy and carries
+# the resolved tag through its self re-exec.
+(
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_UPDATE_REEXECED
+    unset FUTRX_UPDATE_SELECTED_REF FUTRX_CHECKOUT_REF
+    # shellcheck source=../update.sh
+    . "$UPDATE_SCRIPT"
+    remote_load_configuration
+    INSTALL_DIR="$SELECTED_INSTALL"
+    git -C "$INSTALL_DIR" reset --hard origin/main >/dev/null
+    if git -C "$INSTALL_DIR" describe --exact-match --tags HEAD >/dev/null 2>&1; then
+        fail "legacy updater fixture is not on untagged main"
+    fi
+    remote_parse_update_arguments --skip-workspaces
+    update_state="$TEST_DIR/update-selected-state"
+    exec() {
+        printf '%s\n%s\n' \
+            "$FUTRX_UPDATE_SELECTED_REF" \
+            "$(git -C "$INSTALL_DIR" rev-parse HEAD)" > "$update_state"
+    }
+
+    remote_refresh_checkout --skip-workspaces
+    TARGET_REF=""
+    remote_parse_update_arguments --skip-workspaces
+    printf '%s\n' "$TARGET_REF" >> "$update_state"
+)
+mapfile -t update_state < "$TEST_DIR/update-selected-state"
+[ "${update_state[0]}" = "0.21.1" ] ||
+    fail "no-ref infrastructure update did not select the highest release"
+[ "${update_state[1]}" = "$release_commit" ] ||
+    fail "no-ref infrastructure update followed untagged main"
+[ "${update_state[2]}" = "0.21.1" ] ||
+    fail "no-ref infrastructure update lost its selected release during re-exec"
+
+# A retracted release must not remain eligible merely because an installed
+# checkout fetched it previously. Production selection follows the current
+# remote tag set.
+git -C "$SOURCE" push --quiet origin :refs/tags/0.21.1
+(
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_INSTALL_CHECKOUT_SELECTED
+    unset FUTRX_CHECKOUT_REF GITHUB_TOKEN GOOGLE_CLIENT_SECRET
+    # shellcheck source=../install.sh
+    . "$INSTALL_SCRIPT"
+    remote_load_configuration
+    INSTALL_DIR="$SELECTED_INSTALL"
+    REPO_URL="$ORIGIN"
+    git -C "$INSTALL_DIR" reset --hard origin/main >/dev/null
+    if git -C "$INSTALL_DIR" describe --exact-match --tags HEAD >/dev/null 2>&1; then
+        fail "legacy installer fixture is not on untagged main"
+    fi
+    pruned_state="$TEST_DIR/retracted-release-state"
+    remote_replace_process() {
+        printf '%s\n%s\n' \
+            "$FUTRX_CHECKOUT_REF" \
+            "$(git -C "$INSTALL_DIR" tag --list 0.21.1)" > "$pruned_state"
+    }
+
+    remote_select_checkout remote.example.com --skip-dns-check
+)
+mapfile -t pruned_state < "$TEST_DIR/retracted-release-state"
+[ "${pruned_state[0]}" = "0.21.0" ] ||
+    fail "production checkout selected a retracted higher release tag"
+[ -z "${pruned_state[1]}" ] ||
+    fail "production checkout did not prune a retracted release tag"
+
+# Old entry points marked themselves re-executed/selected without carrying an
+# immutable ref. The new scripts must treat that as a legacy handoff and select
+# the latest release instead of building whatever origin/main contained.
+(
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_UPDATE_SELECTED_REF FUTRX_CHECKOUT_REF
+    export FUTRX_UPDATE_REEXECED=1
+    # shellcheck source=../update.sh
+    . "$UPDATE_SCRIPT"
+    remote_load_configuration
+    INSTALL_DIR="$SELECTED_INSTALL"
+    remote_parse_update_arguments --skip-workspaces
+    legacy_update_state="$TEST_DIR/legacy-update-handoff-state"
+    exec() {
+        printf '%s\n' "$FUTRX_UPDATE_SELECTED_REF" > "$legacy_update_state"
+    }
+
+    remote_refresh_checkout --skip-workspaces
+)
+[ "$(<"$TEST_DIR/legacy-update-handoff-state")" = "0.21.0" ] ||
+    fail "legacy updater handoff did not resolve an immutable release"
+
+(
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_CHECKOUT_REF
+    export FUTRX_INSTALL_CHECKOUT_SELECTED=1
+    # shellcheck source=../install.sh
+    . "$INSTALL_SCRIPT"
+    remote_load_configuration
+    INSTALL_DIR="$SELECTED_INSTALL"
+    REPO_URL="$ORIGIN"
+    legacy_install_state="$TEST_DIR/legacy-install-handoff-state"
+    remote_replace_process() {
+        printf '%s\n' "$FUTRX_CHECKOUT_REF" > "$legacy_install_state"
+    }
+
+    remote_select_checkout remote.example.com --skip-dns-check
+)
+[ "$(<"$TEST_DIR/legacy-install-handoff-state")" = "0.21.0" ] ||
+    fail "legacy installer handoff did not resolve an immutable release"
+
 # update.sh must load shared defaults before expanding them under `set -u`.
 # The second case mirrors the in-app launcher, which supplies only the primary
 # install directory.
@@ -48,9 +197,9 @@ grep -q 'full infrastructure update' "$TEST_DIR/update-launcher.out" || \
 
 # update.sh also re-executes itself after selecting the requested release.
 # Preserve the target ref and flags so the selected checkout does not fall
-# back to origin/main on its second pass.
+# lose the selected release on its second pass.
 (
-    unset __FUTRX_DEFAULTS_SOURCED FUTRX_UPDATE_REEXECED
+    unset __FUTRX_DEFAULTS_SOURCED FUTRX_UPDATE_REEXECED FUTRX_UPDATE_SELECTED_REF
     # shellcheck source=../update.sh
     . "$UPDATE_SCRIPT"
     remote_load_configuration

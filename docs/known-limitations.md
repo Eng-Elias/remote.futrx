@@ -48,7 +48,7 @@ These are the constraints worth understanding before you deploy or rely on remot
 - **TOTP 2FA, single-active-session enforcement, sign-in history, and recovery-code alerting exist but are opt-in per account, off by default, and each independently toggleable** from Settings → Security. An account that leaves all four off is unaffected by any of them: no server-side session lookup, no history file, no alert field, and its sessions remain the plain 30-day stateless tokens described below. There is still no admin-facing "force disable 2FA" affordance for a member who has lost both their authenticator and all recovery codes — the local admin's only lever today is manually deleting that account's `DATA_DIR/twofactor/<hash>.json` file on the host, mirroring the existing `local-admin.json` recovery path above. Note also that TOTP codes are single-use: signing in twice inside the same 30-second step requires waiting for the authenticator to roll to the next code.
 - **Sessions remain stateless by default; single-session revocation is opt-in, not universal.** A session that never turned on "single active session" (the vast majority) still cannot be individually revoked — the only levers for it are deleting the user or rotating the global session key. Turning that preference on makes a new login on any device immediately invalidate the account's previous session.
 - **Flat admin/member roles.** There is no per-project "owner" tier. Any project member can read and change that project's secrets and edit its membership. Sharing a project shares its secrets.
-- **The per-project IDE is reachable by any invited user.** `<slug>.code.<host>` authenticates the registered user but does **not** check project membership, so any invited user can open any project's code editor. This is documented in [`docs/02-workspaces/02-auth-users-and-access.md`](02-workspaces/02-auth-users-and-access.md) and analyzed in the [threat model](threat-model.md).
+- **The per-project IDE is reachable by any invited user.** `code.<host>/<slug>/` authenticates the registered user but does **not** check project membership, so any invited user can open any project's code editor. This is documented in [`docs/02-workspaces/02-auth-users-and-access.md`](02-workspaces/02-auth-users-and-access.md) and analyzed in the [threat model](threat-model.md).
 - **Public sharing covers app previews only, and is bearer-token access.** A project member can hand out a time-boxed public link to one `<slug>--<port>.dev.<host>` preview (default 24h, max 30 days, revocable, SHA-256-hashed at rest). Everything else — the IDE, the Agent Browser on port 6080, and the main application — still requires an invited account, and there is still no way to give an outsider read-only access to chats or files. Anyone who obtains a link is the viewer: there is no per-recipient identity, no password on the link, and no audit trail of who opened it. *(`backend/internal/service/share/`)*
 
 ## Agents
@@ -61,22 +61,37 @@ These are the constraints worth understanding before you deploy or rely on remot
   Remote does not load third-party provider modules from configuration or
   shared objects.
 
-- **Claude, Codex, and Kimi identity is a shared host singleton.** Those
-  credentials are authenticated once at host level and seeded into every
-  container, so all users and projects share the same provider accounts and
-  subscription quotas. There is no per-user or per-project identity for those
-  providers, and each allows only one interactive login at a time.
-- **MiniMax identity is an installation-wide Token Plan subscription key.** The key is stored in a
-  mode-`0600` control-plane file without application-level encryption and is
-  injected into every MiniMax run. MiniMax uses a separate `/root/.minimax`
+- **Kimi identity and the Claude/Codex saved-account vault are host-wide.**
+  Claude and Codex can each retain several named subscription logins. A chat
+  selects one account, and Remote materializes it in a stable private provider
+  home keyed by account, project, and chat; concurrent chats may therefore use
+  different accounts without switching one shared credential file. The vault
+  is still installation-wide rather than per-user or per-project: anyone who
+  can use a provider can consume any saved account exposed by the installation.
+  A reconnect must sign in to the same account.
+  If the selected credential cannot be written to the host, the selection
+  still stands and the request reports the failure; Remote writes it again
+  before legacy runs that have no saved account and refuses those runs while
+  that keeps failing.
+  Codex validation asks the Codex app server to refresh the account; Claude's
+  `claude auth status` reads only local files, so a Claude account whose
+  tokens were revoked upstream is detected on its next run rather than when it
+  is selected. Claude's account identity also comes from the locally stored
+  profile, so Remote cannot tell when a project container keeps that profile
+  but swaps the tokens it syncs back (see
+  [threat model](threat-model.md) finding 8). Kimi still retains only one host
+  login.
+- **MiniMax identities are installation-wide named Token Plan subscription keys.** Each key is stored in a
+  mode-`0600` control-plane file without application-level encryption, and only
+  the chat's selected key is injected into that MiniMax run. MiniMax uses a separate `/root/.minimax`
   runtime home, but container root can also read the other mounted provider
   homes; that separation is not a security boundary.
-- **Codex's API-key guard does not inspect newer project-local auth before a
-  run.** Remote rejects a host `auth.json` explicitly marked `apikey` and clears
-  `OPENAI_API_KEY`, but credential seeding does not overwrite a newer
-  project-local record. That record can therefore drive a project run. A
-  successful pull detects the API-key mode only afterward, and the sync error
-  is logged without failing the completed run.
+- **Codex's API-key guard inspects only the host record.** Remote rejects a
+  host `auth.json` explicitly marked `apikey`, clears `OPENAI_API_KEY`, and
+  pushes the host record over the project copy before every project run. An
+  agent can still switch its project copy to API-key mode during a run; a
+  successful pull detects that only afterward, and the sync error is logged
+  without failing the completed run.
 - **The supported Antigravity authentication flow is project-local.** Users
   run `agy` in the project Terminal. Its credential and conversation state
   under `/root/.gemini/antigravity-cli` is a durable provider mount and survives
@@ -167,4 +182,4 @@ These are the constraints worth understanding before you deploy or rely on remot
   shell, chats, API data, or project content. Work cannot continue without a
   connection. The IDE launcher at `code.<host>` is a separate PWA.
 - **The terminal has no reconnect logic.** A network blip ends the terminal view (unlike the chat/workspace sockets, which reconnect).
-- **Automated tests cover only pure state modules.** Hooks, transport, API clients, and UI components are untested by the frontend test suite; CI does not run the Go `go test` suite either (run it locally — see [CONTRIBUTING.md](../CONTRIBUTING.md)).
+- **Automated tests cover only pure state modules.** Hooks, transport, API clients, and UI components are untested by the frontend test suite.

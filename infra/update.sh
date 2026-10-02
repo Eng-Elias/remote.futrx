@@ -12,7 +12,7 @@
 # updates the checkout.
 #
 # Default flow:
-#   1. Reset /opt/remote.futrx to origin/main (or the --ref target).
+#   1. Reset /opt/remote.futrx to the latest release (or the --ref target).
 #   2. Converge host dependencies and all host agent CLIs.
 #   3. Build and restart the application.
 #   4. Rebuild the base image with the pinned agent CLIs.
@@ -61,7 +61,7 @@ remote_parse_update_arguments() {
 HOSTNAME=""
 INCLUDE_BUSY=0
 UPDATE_WORKSPACES=1
-TARGET_REF=""
+TARGET_REF="${FUTRX_UPDATE_SELECTED_REF:-}"
 for a in "$@"; do
     case "$a" in
         --include-busy)    INCLUDE_BUSY=1 ;;
@@ -92,16 +92,31 @@ if [ ! -d "$INSTALL_DIR/.git" ]; then
     exit 1
 fi
 
-# update.sh can itself change in origin/main. Pull once, then hand control to
-# the freshly checked-out copy before reading manifests or invoking install.sh.
-if [ "${FUTRX_UPDATE_REEXECED:-0}" != "1" ]; then
-    UPDATE_REF="${TARGET_REF:-origin/main}"
+# update.sh can itself change in a release. Select it once, then hand control
+# to the freshly checked-out copy before reading manifests or invoking
+# install.sh.
+# Releases before deterministic stamping set only FUTRX_UPDATE_REEXECED after
+# resetting to origin/main. A missing selected ref is therefore a legacy
+# handoff, not proof that an immutable release was selected; resolve and
+# re-exec once more with both values populated.
+if [ "${FUTRX_UPDATE_REEXECED:-0}" != "1" ] || [ -z "$TARGET_REF" ]; then
+    git -C "$INSTALL_DIR" fetch --quiet --tags --prune --prune-tags origin
+    if [ -n "$TARGET_REF" ]; then
+        UPDATE_REF="$TARGET_REF"
+    else
+        # shellcheck source=lib/release-version.sh
+        . "$SCRIPT_INFRA_DIR/lib/release-version.sh"
+        if ! UPDATE_REF="$(release_latest_tag "$INSTALL_DIR")"; then
+            echo "no complete numeric release tag is available for update" >&2
+            exit 1
+        fi
+    fi
     echo "==> Updating repository at $INSTALL_DIR (ref: $UPDATE_REF)"
-    git -C "$INSTALL_DIR" fetch --quiet --tags origin
     # Tags win over identically named branches: --ref pins a release.
     UPDATE_COMMIT="$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "refs/tags/${UPDATE_REF}^{commit}" \
         || git -C "$INSTALL_DIR" rev-parse --verify "${UPDATE_REF}^{commit}")"
     git -C "$INSTALL_DIR" reset --hard "$UPDATE_COMMIT"
+    export FUTRX_UPDATE_SELECTED_REF="$UPDATE_REF"
     export FUTRX_UPDATE_REEXECED=1
     exec bash "$INSTALL_DIR/infra/update.sh" "$@"
 fi
@@ -121,8 +136,8 @@ if [ -z "$HOSTNAME" ]; then
 fi
 
 # Keep install.sh's checkout step (steps/00-checkout.sh) on the same ref this
-# updater just checked out, instead of resetting back to origin/main.
-export FUTRX_CHECKOUT_REF="${TARGET_REF:-origin/main}"
+# updater just checked out instead of resolving the latest release again.
+export FUTRX_CHECKOUT_REF="$TARGET_REF"
 }
 
 remote_converge_update() {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	agentauth "github.com/futrx-com/remote.futrx.com/internal/service/agent/auth"
+	agentquota "github.com/futrx-com/remote.futrx.com/internal/service/agent/quota"
+	serviceapplications "github.com/futrx-com/remote.futrx.com/internal/service/applications"
 	serviceauth "github.com/futrx-com/remote.futrx.com/internal/service/auth"
 	servicechat "github.com/futrx-com/remote.futrx.com/internal/service/chat"
 	serviceproject "github.com/futrx-com/remote.futrx.com/internal/service/project"
@@ -14,8 +16,11 @@ import (
 	serviceusage "github.com/futrx-com/remote.futrx.com/internal/service/usage"
 	serviceuser "github.com/futrx-com/remote.futrx.com/internal/service/user"
 	serviceusersettings "github.com/futrx-com/remote.futrx.com/internal/service/usersettings"
+	"github.com/futrx-com/remote.futrx.com/internal/stores/fileagentquota"
+	"github.com/futrx-com/remote.futrx.com/internal/stores/fileapplications"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileauth"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/filechat"
+	"github.com/futrx-com/remote.futrx.com/internal/stores/fileemail"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileproject"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileprojectaccess"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileprojectsecrets"
@@ -27,6 +32,8 @@ import (
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileusage"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileusers"
 	"github.com/futrx-com/remote.futrx.com/internal/stores/fileusersettings"
+
+	emailoutbound "github.com/futrx-com/remote.futrx.com/internal/port/email/outbound"
 )
 
 type AuthStore interface {
@@ -66,9 +73,13 @@ type Stores struct {
 	UserSettings    serviceusersettings.Repository
 	TwoFactor       serviceauth.TwoFactorStore
 	SessionRegistry serviceauth.SessionRegistryStore
+	Applications    serviceapplications.Store
 	Push            PushStore
 	Usage           serviceusage.Repository
 	AgentAPIKeys    agentauth.APIKeyStore
+	Email           emailoutbound.ConfigurationStore
+	AgentQuota      agentquota.Repository
+	AgentAccounts   agentauth.AccountStore
 	ProjectShares   serviceshare.Repository
 }
 
@@ -136,6 +147,15 @@ func New(dataDir string) (Stores, error) {
 	if err != nil {
 		return Stores{}, fmt.Errorf("init usage store: %w", err)
 	}
+	applications, err := fileapplications.New(dataDir)
+	if err != nil {
+		return Stores{}, fmt.Errorf("init applications store: %w", err)
+	}
+
+	agentQuota, err := fileagentquota.New(dataDir)
+	if err != nil {
+		return Stores{}, fmt.Errorf("init agent quota store: %w", err)
+	}
 
 	push, err := filepush.New(dataDir)
 	if err != nil {
@@ -143,6 +163,7 @@ func New(dataDir string) (Stores, error) {
 	}
 
 	authStore := fileauth.New(dataDir)
+	email := fileemail.New(dataDir)
 	return Stores{
 		Chats:           chats,
 		chatIndexWarmer: chats,
@@ -155,9 +176,13 @@ func New(dataDir string) (Stores, error) {
 		UserSettings:    userSettings,
 		TwoFactor:       twoFactor,
 		SessionRegistry: sessionRegistry,
+		Applications:    applications,
 		Push:            push,
 		Usage:           usage,
 		AgentAPIKeys:    authStore,
+		Email:           email,
+		AgentQuota:      agentQuota,
+		AgentAccounts:   authStore,
 		ProjectShares:   projectShares,
 	}, nil
 }

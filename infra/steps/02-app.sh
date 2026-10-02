@@ -36,9 +36,15 @@ log "Building frontend (frontend/ → backend/public/)"
 )
 
 log "Building backend (Go → backend/remote)"
+
+# shellcheck source=../lib/release-version.sh
+. "$INFRA_DIR/lib/release-version.sh"
+if ! APP_VERSION="$(release_build_version "$INSTALL_DIR" "${FUTRX_CHECKOUT_REF:-}")"; then
+    err "Selected checkout does not match its requested release or candidate ref."
+    exit 1
+fi
 (
     cd backend
-    APP_VERSION="$(git -C .. describe --tags --always --dirty 2>/dev/null || echo dev)"
     go build -trimpath \
         -ldflags="-s -w -X github.com/futrx-com/remote.futrx.com/internal/version.Version=${APP_VERSION}" \
         -o remote ./cmd/remote

@@ -79,9 +79,14 @@ async function handlePush(event) {
   if (payload.chatId && (await isChatOnScreen(payload.chatId))) return;
 
   const urgent = payload.kind === "question";
+  const tag = payload.tag || "remote-futrx";
+  // The tag should make the new notification replace the old one, but iOS
+  // ignores it and stacks them. Closing the old ones first gives every
+  // platform the same one-entry-per-chat tray.
+  await closeNotifications(tag);
   await self.registration.showNotification(payload.title || "remote.futrx", {
     body: payload.body || "",
-    tag: payload.tag || "remote-futrx",
+    tag,
     icon: ICON,
     badge: BADGE,
     data: { chatId: payload.chatId || null, kind: payload.kind || null },
@@ -92,6 +97,15 @@ async function handlePush(event) {
     vibrate: urgent ? [90, 60, 90] : undefined,
     timestamp: Date.now(),
   });
+}
+
+async function closeNotifications(tag) {
+  try {
+    const shown = await self.registration.getNotifications({ tag });
+    for (const notification of shown) notification.close();
+  } catch {
+    // Worst case the old entry stays in the tray next to the new one.
+  }
 }
 
 async function subscriptionBelongsToCurrentAccount() {
@@ -225,18 +239,32 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 async function openChat(chatId) {
+  const path = chatId ? `/chats/${encodeURIComponent(chatId)}` : "/";
   const windows = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true,
   });
-  for (const client of windows) {
-    if (new URL(client.url).origin !== self.location.origin) continue;
-    // Focus first: some browsers ignore a postMessage-driven view change in
-    // a window that never came forward.
+  const sameOrigin = windows.filter((client) => new URL(client.url).origin === self.location.origin);
+  const alreadyOnChat = sameOrigin.find((client) => new URL(client.url).pathname === path);
+  if (alreadyOnChat && "focus" in alreadyOnChat) {
+    await alreadyOnChat.focus();
+    return;
+  }
+  for (const client of sameOrigin) {
+    try {
+      if ("navigate" in client) {
+        const navigated = await client.navigate(path);
+        if (navigated) {
+          if ("focus" in navigated) await navigated.focus();
+          return;
+        }
+      }
+    } catch {
+      // Some installed browsers cannot navigate an existing client.
+    }
     if ("focus" in client) await client.focus();
     client.postMessage({ type: "open-chat", chatId: chatId || null });
     return;
   }
-  // Cold start: the app reads ?chat= on boot and opens straight into it.
-  await self.clients.openWindow(chatId ? `/?chat=${encodeURIComponent(chatId)}` : "/");
+  await self.clients.openWindow(path);
 }

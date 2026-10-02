@@ -124,6 +124,8 @@ for required_contract in 'npm run build' 'go build -trimpath' 'systemctl restart
     grep -Fq "$required_contract" "$DEPLOY_APP_SCRIPT" || \
         fail "deploy-app.sh is missing contract: $required_contract"
 done
+grep -Fq 'app_version="$(release_build_version "$install_dir" "$candidate_sha")"' "$DEPLOY_APP_SCRIPT" || \
+    fail "deploy-app.sh does not use the shared candidate version policy"
 if grep -Eq 'infra/(install|update|upgrade-workspaces)[.]sh|FORCE_REBUILD_BASE_IMAGE|apt-get' "$DEPLOY_APP_SCRIPT"; then
     fail "deploy-app.sh invokes host or workspace convergence"
 fi

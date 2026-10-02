@@ -23,6 +23,7 @@ export function approvalSummaryFields(input: Record<string, unknown>): ApprovalS
         firstDisplayValue(input, ["action", "operation", "request"]),
     },
     { label: "Reason", value: firstDisplayValue(input, ["reason", "why", "description"]) },
+    { label: "Directory", value: displayString(input.cwd) },
   ];
 
   return fields.flatMap(({ label, value }) => {

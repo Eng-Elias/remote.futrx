@@ -31,11 +31,15 @@ type Service struct {
 	lifecycle      UpdateLifecyclePublisher
 	runs           runState
 
-	mu          sync.Mutex
-	lastCheck   *CheckResult
-	launching   bool
-	reconciling bool
-	dispatching bool
+	mu        sync.Mutex
+	lastCheck *CheckResult
+	// resolvedCurrent caches the release tag associated with a hash-stamped
+	// running binary. The running version is immutable for this Service, so the
+	// mapping can be reused while that tag still exists on origin.
+	resolvedCurrent string
+	launching       bool
+	reconciling     bool
+	dispatching     bool
 }
 
 func New(
@@ -70,10 +74,15 @@ func (s *Service) Check(ctx context.Context) Status {
 	} else {
 		latest, latestSegments := latestReleaseTag(tags)
 		result.LatestTag = latest
-		if current, ok := parseReleaseTag(describeBase(s.currentVersion)); ok && latest != "" {
-			result.UpdateAvailable = compareVersions(latestSegments, current) > 0
-			if result.UpdateAvailable {
-				result.UpdateKind = classifyUpdate(s.currentVersion, latest)
+		if latest != "" {
+			currentVersion, current, resolveErr := s.resolveCurrentRelease(ctx, tags)
+			if resolveErr == nil {
+				result.UpdateAvailable = compareVersions(latestSegments, current) > 0
+				if result.UpdateAvailable {
+					result.UpdateKind = classifyUpdate(currentVersion, latest)
+				}
+			} else {
+				result.Error = resolveErr.Error()
 			}
 		}
 	}
@@ -99,14 +108,21 @@ func (s *Service) Apply(ctx context.Context, startedBy, tag string) (Status, err
 		return s.Status(ctx), fmt.Errorf("%w: %s", ErrUnknownTag, tag)
 	}
 
-	status, err := s.startUpdate(ctx, startedBy, tag)
+	// Resolution failures deliberately do not prevent an explicitly requested
+	// update. Passing the original version keeps classifyUpdate conservative:
+	// an untagged or ambiguous hash takes the infrastructure path.
+	currentVersion := s.currentVersion
+	if resolved, _, resolveErr := s.resolveCurrentRelease(ctx, tags); resolveErr == nil {
+		currentVersion = resolved
+	}
+	status, err := s.startUpdate(ctx, startedBy, currentVersion, tag)
 	if err != nil {
 		return status, err
 	}
 	return status, nil
 }
 
-func (s *Service) startUpdate(ctx context.Context, startedBy, tag string) (Status, error) {
+func (s *Service) startUpdate(ctx context.Context, startedBy, currentVersion, tag string) (Status, error) {
 	s.mu.Lock()
 	if s.launching {
 		status := s.statusLocked()
@@ -131,7 +147,7 @@ func (s *Service) startUpdate(ctx context.Context, startedBy, tag string) (Statu
 	// application-only deploy and skip the host convergence that actually
 	// failed. Fall back to the previous failed run's kind when retrying
 	// toward the same target.
-	kind := classifyUpdate(s.currentVersion, tag)
+	kind := classifyUpdate(currentVersion, tag)
 	if prevRun != nil && prevRun.State == RunStateFailed && prevRun.Target == tag && prevRun.UpdateKind != "" {
 		kind = prevRun.UpdateKind
 	}
@@ -292,6 +308,102 @@ func (s *Service) statusLocked() Status {
 func describeBase(describe string) string {
 	base, _, _ := strings.Cut(describe, "-")
 	return base
+}
+
+func isCommitHash(value string) bool {
+	if len(value) < 7 || len(value) > 64 {
+		return false
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// parseQACandidateVersion recognizes immutable QA stamps. New candidates carry
+// their release baseline; the commit-only shape remains supported for builds
+// produced before baseline stamping was introduced.
+func parseQACandidateVersion(version string) (release, commit string, ok bool) {
+	stamp, ok := strings.CutPrefix(version, "qa-")
+	if !ok {
+		return "", "", false
+	}
+	if isCommitHash(stamp) {
+		return "", stamp, true
+	}
+	release, commit, ok = strings.Cut(stamp, "-")
+	if !ok || !isCommitHash(commit) {
+		return "", "", false
+	}
+	if _, ok := parseReleaseTag(release); !ok {
+		return "", "", false
+	}
+	return release, commit, true
+}
+
+// commitFromVersion extracts a commit identity from version stamps that carry
+// one. Local QA versions include additional metadata and deliberately cannot
+// be associated with a release tag.
+func commitFromVersion(version string) (string, bool) {
+	if isCommitHash(version) {
+		return version, true
+	}
+	_, commit, ok := parseQACandidateVersion(version)
+	return commit, ok
+}
+
+// resolveCurrentRelease returns the release baseline represented by the
+// running binary. Normal git-describe values resolve locally. Bare commit
+// hashes and immutable QA candidates require one origin lookup, whose
+// successful result is cached for a later Apply as long as the resolved tag
+// still exists remotely.
+func (s *Service) resolveCurrentRelease(ctx context.Context, tags []string) (string, []int, error) {
+	if release, _, ok := parseQACandidateVersion(s.currentVersion); ok && release != "" {
+		segments, _ := parseReleaseTag(release)
+		return release, segments, nil
+	}
+
+	currentVersion := describeBase(s.currentVersion)
+	current, ok := parseReleaseTag(currentVersion)
+	if ok && (!isCommitHash(currentVersion) || containsTag(tags, currentVersion)) {
+		return currentVersion, current, nil
+	}
+
+	currentCommit, hasCommit := commitFromVersion(s.currentVersion)
+	if !hasCommit && isCommitHash(currentVersion) {
+		currentCommit, hasCommit = currentVersion, true
+	}
+	if !hasCommit {
+		return "", nil, fmt.Errorf("cannot determine release version for running build %q", s.currentVersion)
+	}
+
+	s.mu.Lock()
+	resolved := s.resolvedCurrent
+	if resolved != "" && !containsTag(tags, resolved) {
+		s.resolvedCurrent = ""
+		resolved = ""
+	}
+	s.mu.Unlock()
+	if resolved != "" {
+		segments, _ := parseReleaseTag(resolved)
+		return resolved, segments, nil
+	}
+
+	matchingTags, err := s.host.ListRemoteTagsForCommit(ctx, s.installDir, currentCommit)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve running commit %s: %w", currentCommit, err)
+	}
+	resolved, segments := latestReleaseTag(matchingTags)
+	if resolved == "" {
+		return "", nil, fmt.Errorf("cannot determine release version for running build %q", s.currentVersion)
+	}
+
+	s.mu.Lock()
+	s.resolvedCurrent = resolved
+	s.mu.Unlock()
+	return resolved, segments, nil
 }
 
 // parseReleaseTag parses "0.1", "v0.2.3" and similar numeric release tags

@@ -165,7 +165,7 @@ Each project has an on-demand code-server instance on container port `8842`.
 ```mermaid
 flowchart LR
     Link["Open IDE or file link"] --> Auth["Caddy forward-auth"]
-    Auth --> Host["code.<host>/<slug>/ or <slug>.code.<host>"]
+    Auth --> Host["code.<host>/<slug>/"]
     Host --> Socket["In-container socket activation"]
     Socket --> Code["code-server"]
     Code --> Workspace["/workspace"]

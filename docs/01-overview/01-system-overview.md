@@ -31,7 +31,7 @@ flowchart LR
     P1 --> Apps["Project web apps"]
     P1 --> Chromium["Agent Browser"]
 
-    Caddy -->|"*.code host"| IDE
+    Caddy -->|"code host"| IDE
     Caddy -->|"slug--port.dev host"| Apps
     Caddy -->|"slug--6080.dev host"| Chromium
 ```

@@ -22,6 +22,11 @@ bash -n "$APP_STEP"
 bash -n "$HOST_CLI_PROFILE_TEMPLATE"
 grep -Fq 'go run ./cmd/install-host-agents --prefix "$HOST_CLI_PREFIX"' "$APP_STEP" || \
     fail "application step does not invoke the module-driven host installer"
+grep -Fq 'release_build_version "$INSTALL_DIR" "${FUTRX_CHECKOUT_REF:-}"' "$APP_STEP" || \
+    fail "application step does not stamp the explicitly selected checkout"
+if grep -Fq 'git -C .. describe' "$APP_STEP"; then
+    fail "application step still derives production versions with git describe"
+fi
 if grep -Fq 'go run ./cmd/install-host-agents' "$HOST_DEPS"; then
     fail "host installer runs before the selected application checkout is available"
 fi

@@ -16,6 +16,8 @@ import { useChatComposerController } from "../../state/hooks/chat/useChatCompose
 import { useChatDrawerController } from "../../state/hooks/chat/useChatDrawerController";
 import { useChatFind } from "../../state/hooks/chat/useChatFind";
 import { useChatPreferences } from "../../state/hooks/chat/useChatPreferences";
+import { useAgentCapabilities } from "../../state/hooks/chat/useAgentCapabilities";
+import { streamingPresentationFor } from "../../services/chat/streamingPresentation";
 import { useChatReadMarker } from "../../state/hooks/chat/useChatReadMarker";
 import { useDismissShortcut } from "../../state/hooks/shared/useDismissShortcut.ts";
 import { useTerminalOverlayController } from "../../ui/chat/terminal/useTerminalOverlayController";
@@ -33,11 +35,13 @@ export function ChatContainer({
   const {
     meta,
     blocks,
+    hydratedTextPart,
     eventCount,
     hasOlder,
     loadingOlder,
     indexingProgress,
     status,
+    locallyStartedTurn,
     error,
     canSendPrompt,
     sendPrompt,
@@ -50,6 +54,8 @@ export function ChatContainer({
   } = useChat(chat.id);
   const preferences = useChatPreferences({ chat, loadedMeta: meta, refreshMeta });
   const { displayMeta, displayMode, selectedSkills } = preferences;
+  const agentCapabilities = useAgentCapabilities(displayMeta.projectId);
+  const streamingPresentation = streamingPresentationFor(agentCapabilities.catalog, displayMeta.provider);
   const attachmentBasePath = chatAttachmentService.basePath(displayMeta, projects);
   const project = projects.find((candidate) => candidate.id === displayMeta.projectId);
   const composer = useChatComposerController({
@@ -63,6 +69,7 @@ export function ChatContainer({
     rewind,
     refreshMeta,
     attachmentBasePath,
+    projectId: displayMeta.projectId,
   });
   const browser = useChatBrowserController({
     chat: displayMeta,
@@ -95,6 +102,8 @@ export function ChatContainer({
   const { hasRepos } = useWorkspaceGitRepos({ chatId: chat.id, status });
   const workspaceActions = {
     cwd: displayMeta.cwd || "~",
+    chatId: chat.id,
+    projectId: displayMeta.projectId,
     onToggleTerminal: drawers.terminalOpen ? drawers.closeTerminal : drawers.openTerminal,
     onToggleBrowser: browser.browserOpen ? browser.closeBrowserDrawer : drawers.openBrowser,
     onToggleHistory: drawers.historyOpen ? drawers.closeHistory : drawers.openHistory,
@@ -152,6 +161,7 @@ export function ChatContainer({
     canSendPrompt,
     preferences: {
       provider: displayMeta.provider || "codex",
+      accountId: displayMeta.accountId,
       model: displayMeta.model || "",
       mode: displayMode,
       reasoningEffort: displayMeta.reasoningEffort || "",
@@ -194,10 +204,13 @@ export function ChatContainer({
             find={find}
             chat={displayMeta}
             blocks={blocks}
+            hydratedTextPart={hydratedTextPart}
             hasOlder={hasOlder}
             loadingOlder={loadingOlder}
             indexingProgress={indexingProgress}
             status={status}
+            locallyStartedTurn={locallyStartedTurn}
+            streamingPresentation={streamingPresentation}
             error={error}
             composer={composerView}
             showJump={composer.scroll.showJump}
@@ -222,6 +235,8 @@ export function ChatContainer({
         />
         <FileManagerDrawer
           chatId={chat.id}
+          projectId={chat.projectId}
+          cwd={chat.cwd ?? ""}
           open={drawers.filesOpen}
           onClose={drawers.closeFiles}
         />
@@ -243,12 +258,35 @@ export function ChatContainer({
           onCaptureElement={browser.insertBrowserElementContext}
           onClose={browser.closeBrowserDrawer}
         />
-        {terminal.TerminalOverlay && (
+        {terminal.TerminalOverlay ? (
           <terminal.TerminalOverlay
             chat={displayMeta}
             open={drawers.terminalOpen}
             onClose={drawers.closeTerminal}
           />
+        ) : (
+          drawers.terminalOpen && (
+            <aside
+              id="workspace-terminal-pane"
+              class="workspace-pane workspace-terminal-pane relative z-20 h-full flex-none overflow-hidden bg-surface border-l border-line"
+              aria-label="Terminal"
+            >
+              <div class="flex h-full flex-col items-start justify-center gap-2 p-4">
+                <div class="text-[13px] font-medium text-ink-100">
+                  {terminal.overlayError ?? "Loading terminal…"}
+                </div>
+                {terminal.overlayError && (
+                  <button
+                    type="button"
+                    onClick={terminal.retryTerminalOverlay}
+                    class="h-8 rounded-control border border-line-strong px-3 text-[11px] font-medium text-ink-200 hover:bg-tint-strong"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            </aside>
+          )
         )}
       </div>
       <MediaViewerOverlay />

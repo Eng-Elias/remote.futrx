@@ -9,7 +9,9 @@ import { SidebarSkeleton } from "./SidebarSkeleton";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResultRow } from "../search/SearchResultRow";
 import { AccountFooter } from "./AccountFooter";
+import { ExtensionSlot } from "../primitives/ExtensionSlot";
 import { Skeleton } from "../primitives/Skeleton";
+import { EXTENSION_SLOTS } from "../../config/extensions";
 import { ChevronLeft, ChevronRight, Plus, Search, Settings, X } from "../primitives/icons";
 
 // Sidebar chrome is deliberately unpainted until you touch it: the list is the
@@ -37,6 +39,7 @@ export function Sidebar({
   onDeleteChat,
   onToggleChatUnread,
   onForkChat,
+  onRenameChat,
   onReorderProjects,
   onOpenProjectContainers,
   onOpenSettings,
@@ -61,6 +64,7 @@ export function Sidebar({
   onDeleteChat: (chat: ChatMeta, event: Event) => void;
   onToggleChatUnread: (chat: ChatMeta, event: Event) => void;
   onForkChat: (chat: ChatMeta, event: Event) => void;
+  onRenameChat: (chat: ChatMeta, title: string) => void;
   onReorderProjects: (projectIds: string[]) => void;
   onOpenProjectContainers: (projectId: string) => void;
   onOpenSettings?: () => void;
@@ -105,6 +109,9 @@ export function Sidebar({
               <span class="truncate text-[13px] font-semibold tracking-[-0.01em] text-ink-50">
                 Remote workspace
               </span>
+            </div>
+            <div class={`flex items-center gap-1 ${expandedOnly}`}>
+              <ExtensionSlot name={EXTENSION_SLOTS.sidebarHeaderActions} />
             </div>
             <button
               type="button"
@@ -235,6 +242,7 @@ export function Sidebar({
               onDeleteChat={onDeleteChat}
               onToggleChatUnread={onToggleChatUnread}
               onForkChat={onForkChat}
+              onRenameChat={onRenameChat}
               draggable={canReorderProjects}
               dragging={drag.isDragging(node.project.id)}
               dropPosition={drag.dropPositionOf(node.project.id)}
@@ -257,6 +265,7 @@ export function Sidebar({
                     onDelete={(event) => onDeleteChat(chat, event)}
                     onToggleUnread={(event) => onToggleChatUnread(chat, event)}
                     onFork={(event) => onForkChat(chat, event)}
+                    onRename={(title) => onRenameChat(chat, title)}
                   />
                 ))}
               </div>

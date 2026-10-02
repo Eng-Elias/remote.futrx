@@ -112,6 +112,22 @@ test("renders primitive and structured values without throwing", () => {
   );
 });
 
+test("includes the working directory when the request carries one", () => {
+  assert.deepEqual(
+    approvalSummaryFields({
+      threadId: "01a06c52-5c04-7091-b209-0c294712e68a",
+      reason: "May I refresh apt metadata so I can install Go?",
+      command: "/bin/bash -lc 'apt-get update'",
+      cwd: "/workspace/remote.futrx",
+    }),
+    [
+      { label: "Command", value: "/bin/bash -lc 'apt-get update'" },
+      { label: "Reason", value: "May I refresh apt metadata so I can install Go?" },
+      { label: "Directory", value: "/workspace/remote.futrx" },
+    ],
+  );
+});
+
 test("returns no fields when the payload has no supported summary keys", () => {
   assert.deepEqual(approvalSummaryFields({ input: "raw" }), []);
 });

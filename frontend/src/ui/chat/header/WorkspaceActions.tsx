@@ -1,7 +1,10 @@
 import { useId, useState } from "preact/hooks";
 import { useDismissKeyDown } from "../../../state/hooks/shared/useDismissKeyDown.ts";
 import { CalendarClock, Clock, Code, Folder, Monitor, Terminal } from "../../primitives/icons";
-import { buildIdeUrl, defaultWorkspacePath } from "../ideLinks";
+import { ExtensionSlot } from "../../primitives/ExtensionSlot";
+import { EXTENSION_SLOTS } from "../../../config/extensions";
+import { buildIdeUrl } from "../ideLinks";
+import { DEFAULT_WORKSPACE_PATH } from "../../../config/workspace";
 
 // Two states only, and they never fight over the same property: Tailwind emits
 // utilities in file order, so an "expanded" colour appended after a base colour
@@ -14,6 +17,8 @@ const actionExpanded = `${actionBase} bg-accent-blue/[0.14] text-accent-blue hov
 
 export function WorkspaceActions({
   cwd,
+  chatId,
+  projectId,
   onToggleTerminal,
   onToggleBrowser,
   onToggleHistory,
@@ -29,6 +34,8 @@ export function WorkspaceActions({
   orientation,
 }: {
   cwd: string;
+  chatId?: string;
+  projectId?: string;
   onToggleTerminal: () => void;
   onToggleBrowser: () => void;
   onToggleHistory: () => void;
@@ -43,12 +50,18 @@ export function WorkspaceActions({
   showSchedules: boolean;
   orientation: "horizontal" | "vertical";
 }) {
-  const workspacePath = cwd && cwd !== "~" ? cwd : defaultWorkspacePath;
+  const workspacePath = cwd && cwd !== "~" ? cwd : DEFAULT_WORKSPACE_PATH;
   const ideUrl = buildIdeUrl(workspacePath);
   const tooltipPlacement = orientation === "horizontal" ? "below" : "left";
 
   return (
     <div class={`flex items-center gap-0.5 ${orientation === "horizontal" ? "flex-row" : "flex-col"}`}>
+      <ExtensionSlot
+        name={EXTENSION_SLOTS.chatHeaderActions}
+        chatId={chatId}
+        projectId={projectId}
+        cwd={workspacePath}
+      />
       <WorkspaceAction
         Icon={Code}
         href={ideUrl}

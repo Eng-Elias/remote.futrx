@@ -1,20 +1,29 @@
 # Lifecycle publishers and subscribers
 
-`internal/lifecycle` provides typed, in-process notifications between already
-constructed application services. It is deliberately smaller than a message
-bus: it has no discovery, persistence, buffering, retry, transport, or global
-registry.
+`internal/lifecycle` owns two related in-process notification layers:
 
-The current runtime has one event family, application self-updates, represented
-by `UpdatePublisher`. The publisher is injected into `selfupdate.Service`
-through a narrow producer-owned port. No production subscriber is currently
-registered.
+- typed publishers for core workflows, with domain-specific event values and
+  subscriber interfaces; and
+- `EventBus`, the dynamic envelope used for validated application-manifest
+  publishers and subscriptions.
+
+Neither layer is durable: there is no persistence, replay, retry, external
+transport, automatic discovery, or package-level global registry.
+
+The current runtime has two typed domain publishers. `UpdatePublisher` reports
+Remote self-updates. `ApplicationPublisher` reports application-catalog
+mutations and installed-copy transitions through two precise subscriptions
+because those events have different payloads. Both are injected into their
+producers through narrow producer-owned ports. `ApplicationEventBridge` is the
+production subscriber that translates the latter into the public
+`remote.applications` version-1 event family on `EventBus`.
 
 This guide explains how to:
 
 - add an event to an existing event family;
 - add a subscriber to an existing publisher; and
-- add a publisher for a new event family.
+- add a publisher for a new typed event family; and
+- expose or consume a validated dynamic application event.
 
 ## Ownership model
 
@@ -22,11 +31,14 @@ Each part has one owner:
 
 | Part | Responsibility | Current example |
 | --- | --- | --- |
-| Event contract | Defines a small typed fact and its states | [`UpdateState` and `UpdateEvent`](../../backend/internal/lifecycle/update_publisher.go) |
-| Publisher | Owns subscriptions, snapshots, and synchronous dispatch | [`UpdatePublisher`](../../backend/internal/lifecycle/update_publisher.go) |
-| Producer port | Exposes only the publish methods one producer needs | [`selfupdate.UpdateLifecyclePublisher`](../../backend/internal/service/selfupdate/ports.go) |
-| Producer | Publishes at the workflow transition it owns | [`selfupdate.Service`](../../backend/internal/service/selfupdate/service.go) |
-| Subscriber | Owns one reaction to the event; none exists in production today | `lifecycle.UpdateSubscriber` implementation |
+| Event contract | Defines a small typed fact and its states | [`UpdateEvent`](../../backend/internal/lifecycle/update_publisher.go), [`ApplicationCatalogEvent` and `ApplicationInstanceEvent`](../../backend/internal/lifecycle/application_publisher.go) |
+| Publisher | Owns typed subscriptions and delegates shared delivery mechanics | [`UpdatePublisher`](../../backend/internal/lifecycle/update_publisher.go), [`ApplicationPublisher`](../../backend/internal/lifecycle/application_publisher.go) |
+| Producer port | Exposes only the publish methods one producer needs | [`selfupdate.UpdateLifecyclePublisher`](../../backend/internal/service/selfupdate/ports.go), [`applications.ApplicationLifecyclePublisher`](../../backend/internal/service/applications/ports.go) |
+| Producer | Publishes at the workflow transition it owns | [`selfupdate.Service`](../../backend/internal/service/selfupdate/service.go), [`applications.Service`](../../backend/internal/service/applications/service.go) |
+| Typed subscriber | Owns one reaction to a typed event; none is registered for self-update today | `lifecycle.UpdateSubscriber` implementation |
+| Core-to-application bridge | Translates typed application lifecycle facts into the public event envelope | [`ApplicationEventBridge`](../../backend/internal/lifecycle/application_event_bridge.go) |
+| Dynamic bus | Dispatches host-stamped `applications.Event` values to explicitly registered in-process callbacks | [`EventBus`](../../backend/internal/lifecycle/event_bus.go) |
+| Application delivery adapter | Queues accepted events, applies scope/subscription policy, and calls running backends | [`applicationEventRouter`](../../backend/internal/service/applications/event_routing.go) |
 | Composition root | Constructs publishers, injects producer ports, and registers subscribers | [`cmd/remote/main.go`](../../backend/cmd/remote/main.go) |
 
 Publishers belong to one cohesive lifecycle domain. Producers depend on their
@@ -56,9 +68,11 @@ flowchart LR
     Publisher -.->|OnUpdate| Subscriber
 ```
 
-There is intentionally no `Registry`, `Bindings`, automatic package
-registration, or package-level singleton. A publisher is an ordinary process
-dependency with explicit construction and wiring.
+There is intentionally no automatic package registration or package-level
+singleton. Typed publishers and `EventBus` are ordinary process dependencies
+with explicit construction and wiring. The application catalog is the
+validated declaration registry for dynamic publisher and event names; core
+typed publishers do not acquire a parallel string catalog.
 
 ## Current event catalog
 
@@ -82,11 +96,129 @@ application data.
 | `UpdateSucceeded` (`succeeded`) | `PublishUpdateSucceeded` | Reconciler observes a durable successful result | Recovered after restart, then checkpointed |
 | `UpdateFailed` (`failed`) | `PublishUpdateFailed` | Immediately when updater launch fails, or when reconciliation observes terminal failure | Immediate failure is not replayed; reconciled failure is checkpointed |
 
-The named state constants are the event list for this family. There is no
-runtime `[]any` event catalog: one publish call dispatches one typed event
+The named state constants are the event list for this typed family. It does not
+use the dynamic manifest registry: one publish call dispatches one typed event
 value. Keep this table updated whenever that state list changes.
 
-## Delivery contract
+### Application catalog events
+
+`ApplicationCatalogEvent` contains `State` and `ApplicationID`. It deliberately
+does not carry an uploaded archive, manifest configuration, or installed-copy
+details.
+
+| State | Publish method | Production emission point |
+| --- | --- | --- |
+| `ApplicationAdded` (`added`) | `PublishApplicationAdded` | A first uploaded package has been stored, validated, and loaded into the live catalog |
+| `ApplicationUpdated` (`updated`) | `PublishApplicationUpdated` | An existing uploaded package has been atomically replaced and loaded |
+| `ApplicationDeleted` (`deleted`) | `PublishApplicationDeleted` | Installed copies selected for cascade removal are gone and the uploaded package has left the live catalog |
+
+Built-in applications discovered at process start do not emit `added`; these
+states describe runtime catalog mutations, not catalog enumeration.
+
+### Installed-application events
+
+`ApplicationInstanceEvent` contains `State`, `ApplicationID`, `InstanceID`,
+`Scope`, and `ProjectID`. It excludes resolved environment variables,
+credentials, container addresses, and installer output.
+
+| State | Publish method | Production emission point |
+| --- | --- | --- |
+| `ApplicationInstalled` (`installed`) | `PublishApplicationInstalled` | Provisioning, backend startup, and the final running record have succeeded |
+| `ApplicationUninstalled` (`uninstalled`) | `PublishApplicationUninstalled` | Teardown and deletion of the instance record have succeeded |
+| `ApplicationStarted` (`started`) | `PublishApplicationStarted` | A stopped copy has reached and persisted running state |
+| `ApplicationStopped` (`stopped`) | `PublishApplicationStopped` | A running copy has reached and persisted stopped state |
+
+Install emits only `installed`, and uninstall emits only `uninstalled`.
+Same-state Start or Stop requests may reconverge runtime state but do not emit a
+duplicate transition. Automatic upgrades do not masquerade as installs or
+starts. Retry cleanup of a failed attempt stays silent; only the successful
+replacement install emits. Package cascade removal emits each committed
+`uninstalled` event before the final `deleted` event.
+
+All application events are in-memory only and are not replayed after a process
+restart. A crash after the durable mutation and before dispatch can therefore
+lose its notification. Use an outbox or another durable mechanism if a consumer
+must observe every mutation.
+
+## Dynamic application event bridge
+
+The typed `ApplicationPublisher` remains the authoritative core contract.
+`ApplicationEventBridge` subscribes to both of its streams and publishes a
+host-owned `applications.Event` on `EventBus`:
+
+| Typed state | Dynamic publisher | Name | Version |
+|---|---|---|---|
+| catalog `added`, `updated`, `deleted` | `remote.applications` | same as state | `1` |
+| instance `installed`, `uninstalled`, `started`, `stopped` | `remote.applications` | same as state | `1` |
+
+Every payload contains `version: 1` and the subject `applicationId`. Instance
+payloads also contain `instanceId`, `scope`, and `projectId` when project
+scoped. The event source always identifies the emitter as application
+`remote` and publisher `remote.applications`; instance sources additionally
+carry the subject instance/scope/project so the delivery adapter can apply
+routing without interpreting JSON.
+
+Application-owned events reach the same bus through the backend host. The host
+accepts only a manifest-declared local publisher, event, and version; requires
+a non-null JSON object of at most 64 KiB; and stamps the installed copy's
+identity plus canonical publisher
+`applications.<application-id>.<local-publisher>`. Backends never construct a
+trusted source.
+
+`EventBus.Publish` uses `eventDispatcher` only to snapshot callbacks. It copies
+the event and nonblockingly submits that snapshot to a 256-item, drop-new queue;
+one worker later invokes callbacks in publication and registration order with
+an independent payload copy for each. Core code may subscribe directly when it
+needs this dynamic envelope. Such callbacks are explicit composition-root
+dependencies, receive the bus lifecycle context rather than the producer's
+request context, and never run inline under producer-owned locks. They see the
+raw feed; project-origin filtering belongs to the application delivery adapter,
+so a direct core subscriber applies its own side-effect audience policy. A
+callback panic is recovered and logged; a slow callback still delays later
+dynamic events and should enqueue its own bounded work.
+
+Application backends do not subscribe directly to `EventBus`. The application
+service registers one router during construction and unregisters it when its
+lifecycle context ends or the service closes. Shutdown joins this worker before
+stopping child backends. The router adds a second bounded boundary, so the bus
+worker never waits on backend startup or application code. That router:
+
+1. nonblockingly enqueues into a 256-event channel;
+2. drops and logs the newly published event if the channel is full, preserving
+   events already queued;
+3. starts accepted-event and recipient delivery attempts in order on one
+   worker;
+4. resolves matching subscriptions from the current catalog and running
+   instance store;
+5. routes a project-origin event only to project instances in that same
+   project, never to global instances, while global-origin and scope-less
+   catalog events may reach matching instances in every scope; and
+6. bounds both lazy backend startup and each delivery by the smaller of the
+   backend timeout and 30 seconds, logging errors/timeouts and continuing to
+   later recipients.
+
+If the bus queue is full, no dynamic subscriber sees the drop. If the router's
+queue is full, direct core callbacks may already have seen the event while
+application delivery drops it. Both boundaries log and drop the new event while
+preserving accepted order. Publication never waits for a core hook or
+application code. A slow recipient can delay later queued application delivery
+for at most 30 seconds but cannot fail the producer or block routing
+permanently. There is no acknowledgement, retry, or replay.
+Because net/rpc cannot cancel an `OnEvent` already executing in the backend,
+the host terminates a process that exceeds its deadline. This releases the
+stuck RPC instead of accumulating handlers; the event remains lost, and the
+next request or event starts a clean process. Event handlers remain
+concurrency-safe because they may overlap ordinary backend calls.
+
+Only running instances are eligible: install/start add eligibility after the
+committed transition, while stop/uninstall remove it. The host lazily restores
+a missing process and completes its capability handshake before delivery.
+
+The public declaration, SDK API, payload constraints, and exact scope matrix
+are documented in
+[Installable applications: Backend event lifecycle](installable-applications/18-application-events.md).
+
+## Typed delivery contract
 
 For each publish call, a publisher:
 
@@ -135,6 +267,12 @@ The following details are part of the contract:
   behavior. Enqueue the event data and any explicitly copied metadata, not the
   caller's context: a request context may be canceled as soon as `OnUpdate`
   returns. A queued worker needs its own lifecycle context.
+- Application instance events are published while the service still holds that
+  instance's lifecycle write lock. This preserves committed transition order.
+  A synchronous typed subscriber must not call Start, Stop, Uninstall, upgrade,
+  or another write operation for that same instance inline; enqueue the
+  reaction and return. The application-event bridge follows this rule by only
+  performing a nonblocking enqueue.
 - Never subscribe a nil implementation; the current publisher accepts it but
   the next publish will panic.
 
@@ -204,7 +342,8 @@ Use the smallest contract that matches the real lifecycle:
 | Same lifecycle owner, required payload, subscriber audience, and delivery rules | Add a state and semantic publish method to the existing publisher |
 | Same family, and every state now requires one additional field | Add a required field and migrate every producer, subscriber, and test together |
 | Different payload, lifecycle owner, or subscriber audience, but the same synchronous in-memory delivery contract | Add a separate precise event family and publisher |
-| Asynchronous, cross-process, replayable, or retryable delivery | Use a queue, durable workflow state, an outbox, or transport designed for that guarantee; do not enlarge this in-memory publisher |
+| Public application-to-application notification with manifest namespace and scope routing | Declare it in `application.json` and publish through the validated `EventBus` bridge |
+| Replayable, retryable, or externally transported delivery | Use durable workflow state, an outbox, or transport designed for that guarantee; neither in-memory publisher provides it |
 
 ```mermaid
 flowchart TD
@@ -435,8 +574,9 @@ NewJobPublisher() *JobPublisher
 (*JobPublisher).PublishJobFinished(context.Context, string)
 ```
 
-Use `UpdatePublisher` as the implementation reference. Publishers in this
-package preserve these delivery mechanics:
+Use `UpdatePublisher` or `ApplicationPublisher` as the implementation
+reference. Publishers in this package preserve these delivery mechanics
+through the private `eventDispatcher`:
 
 - snapshot under a read lock and invoke callbacks after releasing it;
 - synchronous registration-order dispatch for one publish call;
@@ -444,11 +584,13 @@ package preserve these delivery mechanics:
 - idempotent unsubscribe; and
 - private subscription storage and raw dispatch.
 
-Some repeated syntax is cheaper than introducing a generic registry or an
-unproven abstraction. Extract shared publisher machinery only when several real
-publishers demonstrate the same stable contract. If a domain needs different
-delivery guarantees, use a mechanism designed for those guarantees instead of
-adding a special-case publisher here.
+`eventDispatcher` shares only subscription storage and dispatch. Event states,
+payloads, subscriber interfaces, and semantic publish methods stay on the
+domain publisher. `EventBus` intentionally specializes the same helper for the
+validated `applications.Event` envelope; that does not make it a global
+singleton or a replacement for precise core contracts. If a domain needs
+different delivery guarantees, use a mechanism designed for those guarantees
+instead of adding a special case here.
 
 ### 3. Give each producer a narrow port
 
@@ -483,8 +625,10 @@ jobService.Start(ctx)
 ```
 
 Keep each publisher as a named local dependency. Do not introduce reflection,
-string-keyed event routing, automatic package discovery, or a package-level
-singleton.
+automatic package discovery, or a package-level singleton. Use string-keyed
+routing only through the existing validated application `EventBus` contract;
+do not replace an internal typed domain contract merely to avoid defining its
+event type.
 
 ### 5. Test the complete boundary
 
@@ -510,6 +654,8 @@ Use the narrowest affected packages first:
 ```bash
 cd backend
 go test -race ./internal/lifecycle ./internal/service/selfupdate
+go test -race ./internal/service/applications ./internal/integration/applications
+go test ./internal/integration/containers/applications ./pkg/applications/...
 ```
 
 For a new family, append the concrete producer and subscriber package paths to
@@ -528,6 +674,12 @@ The existing behavioral examples are:
 - [`update_publisher_test.go`](../../backend/internal/lifecycle/update_publisher_test.go)
   for order, context, unsubscribe, re-entrant subscription changes, snapshot
   behavior, and concurrent dispatch; and
+- [`event_bus_test.go`](../../backend/internal/lifecycle/event_bus_test.go) and
+  [`application_event_bridge_test.go`](../../backend/internal/lifecycle/application_event_bridge_test.go)
+  for dynamic dispatch copies and canonical core envelopes;
+- application service and host event tests for scope routing, bounded overload,
+  manifest authorization, payload validation, timeout/error isolation, and the
+  RPC capability handshake; and
 - [`selfupdate/service_test.go`](../../backend/internal/service/selfupdate/service_test.go)
   for start-before-launch ordering, terminal publication, restart
   reconciliation, checkpointing, and launch failure.

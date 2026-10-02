@@ -55,7 +55,7 @@ sequenceDiagram
 
 Properties that make this safe to hand out:
 
-- **One port, one project.** The token is bound to the project slug and the port. It is refused on any other host, on `*.code.<host>`, on port 6080 (Agent Browser noVNC), and on the main application.
+- **One port, one project.** The token is bound to the project slug and the port. It is refused on any other host, on application hosts, on port 6080 (Agent Browser noVNC), and on the main application.
 - **Nothing replayable is stored.** `DATA_DIR/projectshares/<projectId>.json` holds only a SHA-256 digest of each token, plus port, label, creator, timestamps, and a revocation stamp.
 - **Time-boxed.** Default lifetime 24 hours; the UI offers 1 hour, 24 hours, and 7 days; the service refuses anything under 1 hour or over 30 days.
 - **Revocable immediately.** Every request re-reads the link from the store, so revoking one stops the next request, cookie or not.

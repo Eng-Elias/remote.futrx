@@ -1,3 +1,5 @@
+import type { FileOpenRequest } from "../../models/files.ts";
+import { API_ROUTES } from "../../config/routes.ts";
 import { fileService } from "../../services/files/fileService.ts";
 
 export const defaultWorkspacePath = "/opt/remote.futrx";
@@ -98,9 +100,10 @@ export function internalPathOpenUrl(href: string, context: IdeLinkContext = {}):
   if (!isContainerWorkspacePath(path) && !isHostWorkspacePath(path)) return null;
 
   if (context.chatId) {
-    const params = new URLSearchParams({ path: refToString(path, ref) });
-    const action = isBrowserMediaPath(path) ? "media-open" : "ide-open";
-    return `/api/chats/${encodeURIComponent(context.chatId)}/${action}?${params.toString()}`;
+    const refString = refToString(path, ref);
+    return isBrowserMediaPath(path)
+      ? API_ROUTES.chats.mediaOpen(context.chatId, refString)
+      : API_ROUTES.chats.ideOpen(context.chatId, refString);
   }
 
   const workspaceRoot = workspaceRootFromCwd(context.cwd);
@@ -197,4 +200,12 @@ function stripPathSuffix(href: string): string {
   const queryIndex = href.indexOf("?");
   const cut = [hashIndex, queryIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0];
   return cut === undefined ? href : href.slice(0, cut);
+}
+
+// The built-in editor remains available until its application migration.
+export const builtinEditorAvailable = true;
+
+export function builtinWorkspaceFileUrl(request: FileOpenRequest): string | null {
+  const line = request.line ? `:${request.line}${request.column ? `:${request.column}` : ""}` : "";
+  return internalPathOpenUrl(`${request.path}${line}`, { cwd: request.cwd });
 }

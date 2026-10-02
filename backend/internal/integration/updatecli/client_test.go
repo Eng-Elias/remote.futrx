@@ -1,6 +1,7 @@
 package updatecli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -11,6 +12,38 @@ import (
 
 	serviceselfupdate "github.com/futrx-com/remote.futrx.com/internal/service/selfupdate"
 )
+
+func TestListRemoteTagsForCommitResolvesLightweightAndAnnotatedTags(t *testing.T) {
+	originDir := filepath.Join(t.TempDir(), "origin.git")
+	seedDir := filepath.Join(t.TempDir(), "seed")
+	runGit(t, "", "init", "--bare", "--quiet", originDir)
+	runGit(t, "", "init", "--quiet", seedDir)
+	runGit(t, seedDir, "config", "user.name", "Update Test")
+	runGit(t, seedDir, "config", "user.email", "update-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(seedDir, "version"), []byte("0.20.1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seedDir, "add", "version")
+	runGit(t, seedDir, "commit", "--quiet", "-m", "0.20.1")
+	oldCommit := runGit(t, seedDir, "rev-parse", "HEAD")
+	runGit(t, seedDir, "tag", "0.20.1")
+	runGit(t, seedDir, "tag", "-a", "0.20.1.1", "-m", "release alias")
+	if err := os.WriteFile(filepath.Join(seedDir, "version"), []byte("0.20.4"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seedDir, "commit", "--quiet", "-am", "0.20.4")
+	runGit(t, seedDir, "tag", "0.20.4")
+	runGit(t, seedDir, "remote", "add", "origin", originDir)
+	runGit(t, seedDir, "push", "--quiet", "origin", "HEAD", "--tags")
+
+	tags, err := (Client{}).ListRemoteTagsForCommit(context.Background(), seedDir, oldCommit[:7])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(tags, ","), "0.20.1,0.20.1.1"; got != want {
+		t.Fatalf("matching tags = %q, want %q", got, want)
+	}
+}
 
 func TestStartUpdaterSelectsReleaseScript(t *testing.T) {
 	installDir := t.TempDir()

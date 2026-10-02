@@ -138,7 +138,7 @@ function Preview() {
           account={{ email: "me@ahmedwaleed.net", authenticated: true }}
           onClose={noop} onOpenPalette={noop} onToggleSidebar={noop}
           onNewProject={noop} onNewChatInProject={noop} onToggleProject={noop}
-          onSelectChat={noop} onDeleteChat={noop} onToggleChatUnread={noop} onForkChat={noop}
+          onSelectChat={noop} onDeleteChat={noop} onToggleChatUnread={noop} onForkChat={noop} onRenameChat={noop}
           onReorderProjects={noop} onOpenProjectContainers={noop} onOpenSettings={noop} onSignOut={noop}
         />
       }
@@ -157,10 +157,11 @@ function Preview() {
           </div>
           <div class="relative min-h-0 flex-1">
             <MessageList
-              status="streaming" blocks={blocks} hasOlder loadingOlder={false} indexingProgress={null} error={null}
+              status="streaming" locallyStartedTurn={false} blocks={blocks} hasOlder loadingOlder={false} indexingProgress={null} error={null}
+              streamingPresentation="blocks"
               chatId="c1" cwd="/opt/remote.futrx/gamerhead"
               scrollRef={scrollRef} contentRef={contentRef} bottomRef={bottomRef}
-              onScroll={noop} onAnswerQuestion={noop} onLoadOlder={noopAsync} onRewind={noop}
+              onScroll={noop} onAnswerQuestion={() => false} onLoadOlder={noopAsync} onRewind={noop}
             />
           </div>
 

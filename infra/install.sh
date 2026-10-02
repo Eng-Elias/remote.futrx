@@ -27,7 +27,7 @@
 #   --skip-dns-check                            useful on cloud bootstrap where the public
 #                                               A record is set but propagation isn't done.
 #   --ref=<40-character commit SHA>             install an immutable candidate commit instead
-#                                               of origin/main (used by QA branch installs).
+#                                               of the latest release (used by QA branch installs).
 #   --github-token=ghp_xxx                      private-repo PAT; prefer the
 #                                               GITHUB_TOKEN environment variable
 #                                               to avoid placing it in shell history.
@@ -156,10 +156,15 @@ if [ -z "$INFRA_DIR_PROBE" ] || [ ! -d "${INFRA_DIR_PROBE}/steps" ]; then
                 # update.sh, steps/00-checkout.sh, ...) silently stops refreshing
                 # origin/main.
                 git -C "$LEGACY_TARGET" config remote.origin.fetch "$MAIN_REFSPEC"
-                git -C "$LEGACY_TARGET" fetch --quiet --tags origin
+                git -C "$LEGACY_TARGET" fetch --quiet --tags --prune --prune-tags origin
                 git -C "$LEGACY_TARGET" reset --hard origin/main
             fi
-            export FUTRX_INSTALL_CHECKOUT_SELECTED=1
+            if [ -n "$BOOTSTRAP_REF" ]; then
+                export FUTRX_CHECKOUT_REF="$BOOTSTRAP_REF"
+                export FUTRX_INSTALL_CHECKOUT_SELECTED=1
+            else
+                unset FUTRX_CHECKOUT_REF FUTRX_INSTALL_CHECKOUT_SELECTED
+            fi
             remote_exec_selected_installer "$LEGACY_TARGET/infra/install.sh" "$@"
         fi
     fi
@@ -178,8 +183,9 @@ if [ -z "$INFRA_DIR_PROBE" ] || [ ! -d "${INFRA_DIR_PROBE}/steps" ]; then
             exit 1
         fi
         mkdir -p "$TARGET"
-        # Production installs track main regardless of the repository's GitHub
-        # default branch (which may temporarily point at a QA branch).
+        # Bootstrap the release-selection logic from main regardless of the
+        # repository's GitHub default branch (which may temporarily point at a
+        # QA branch). Step 00 then selects the latest numeric release tag.
         git clone --depth=1 --branch main --single-branch "$CLONE_URL" "$TARGET"
         chmod 0600 "$TARGET/.git/config"
         if [ -n "$BOOTSTRAP_REF" ]; then
@@ -199,12 +205,17 @@ if [ -z "$INFRA_DIR_PROBE" ] || [ ! -d "${INFRA_DIR_PROBE}/steps" ]; then
             # keep refreshing origin/main instead of silently going stale on a
             # checkout whose remote.origin.fetch still points at another branch.
             git -C "$TARGET" config remote.origin.fetch "$MAIN_REFSPEC"
-            git -C "$TARGET" fetch --quiet --tags origin
+            git -C "$TARGET" fetch --quiet --tags --prune --prune-tags origin
             git -C "$TARGET" reset --hard origin/main
         fi
     fi
 
-    export FUTRX_INSTALL_CHECKOUT_SELECTED=1
+    if [ -n "$BOOTSTRAP_REF" ]; then
+        export FUTRX_CHECKOUT_REF="$BOOTSTRAP_REF"
+        export FUTRX_INSTALL_CHECKOUT_SELECTED=1
+    else
+        unset FUTRX_CHECKOUT_REF FUTRX_INSTALL_CHECKOUT_SELECTED
+    fi
     remote_exec_selected_installer "$TARGET/infra/install.sh" "$@"
 fi
 }
