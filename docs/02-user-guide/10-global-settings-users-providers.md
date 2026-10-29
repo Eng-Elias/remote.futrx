@@ -26,7 +26,8 @@ without login controls.
 
 Claude, Codex, and Kimi authentication is host-wide and administrator-managed.
 Sign in once on the parent host; Remote then seeds those provider credentials
-into project containers. MiniMax uses a host-managed Token Plan subscription
+into project containers. Devin uses a host-managed manual token flow with the
+same credential seeding. MiniMax uses a host-managed Token Plan subscription
 key. Antigravity uses a project-local sign-in flow; both are described below.
 
 ![Administrator view of Claude, Codex, and Kimi authentication](/assets/docs/screenshots/03-agent-authentication-01m05s.webp)
@@ -66,19 +67,21 @@ Codex account or `/root/.codex` state. This is runtime separation, not a
 security boundary: container root can read every provider home mounted in that
 project.
 
-Configure MiniMax once for the Remote installation:
+Configure one or more MiniMax accounts for the Remote installation:
 
-1. Open **Settings → Agents** and choose **Sign in with MiniMax** (or
-   **Refresh MiniMax login** when replacing a key).
+1. Open **Settings → Agents**, expand **MiniMax Saved accounts**, and choose
+   **Add account** (or **Reconnect** when replacing one account's key).
 2. Follow the **Get a MiniMax Token Plan subscription key** link to subscribe,
    create, or retrieve the supported key from MiniMax. Remote does not link to
    the pay-as-you-go key console because standard API keys are not supported.
-3. Paste the `sk-cp-…` key into the masked field and choose **Save API key**.
+3. Give the account a recognizable label, paste the `sk-cp-…` key into the
+   masked field, and choose **Save API key**.
    Remote checks that it is a Token Plan key and validates it with MiniMax's
    subscription quota endpoint before storing it.
-4. Return to a project chat and select **MiniMax** and **MiniMax-M3**.
+4. Return to a project chat and select the account, **MiniMax**, and
+   **MiniMax-M3** in the composer.
 
-Remote passes the key to the Codex process as an environment variable and
+Remote passes only the chat's selected key to the Codex process as an environment variable and
 configures Codex to read that variable. It does not embed the key in the
 generated model catalog or command-line configuration. The key is never
 returned to the browser after saving. MiniMax is not offered for loose chats.
@@ -92,6 +95,20 @@ its model list remains unavailable until a validated key exists.
 3. Enter the displayed code.
 4. Approve the account.
 5. Return to Remote and wait for the connected state.
+
+### Connect Devin
+
+Devin authentication is host-managed. An administrator runs the manual token
+flow once on the host; Remote then seeds the credential file into project
+containers.
+
+1. On the host, run `devin auth login --force-manual-token-flow`.
+2. Open the displayed `app.devin.ai/auth/cli/continue` URL.
+3. Sign in to Devin in the browser.
+4. Paste the returned code into the CLI prompt.
+5. Wait for the credentials file to be written.
+6. In Remote, choose **Refresh models** in a project chat's provider/model
+   picker to pick up the newly synchronized credentials.
 
 ### Use Antigravity
 
@@ -125,23 +142,23 @@ is unavailable to a loose chat. Use a project chat for normal Antigravity work.
 
 Antigravity does not satisfy Remote's initial provider gate because Remote
 cannot observe external auth authoritatively. A server administrator must still
-connect one of the current gate-eligible modules: Claude, Codex, or Kimi.
+connect one of the current gate-eligible modules: Claude, Codex, Kimi, or Devin.
 
 ### Shared-provider implications
 
-- Every user and project shares the same host Claude, Codex, and Kimi accounts
-  and their quotas.
-- Those three provider credentials are copied into project credential
+- Every user and project shares the same host Claude, Codex, Kimi, and Devin
+  accounts and their quotas.
+- Those four provider credentials are copied into project credential
   locations.
 - An agent that can read its project credential files can act with that provider authority.
-- Claude, Codex, and Kimi homes are durable but separate by provider format, not separate security principals.
+- Claude, Codex, Kimi, and Devin homes are durable but separate by provider format, not separate security principals.
 - Re-authentication can affect every project.
 - Antigravity is project-local rather than host-wide, but its credential state
   is still readable by container root and shared by everyone with authority in
   that project.
-- MiniMax runs only in projects, but its Token Plan subscription key is
-  installation-wide and administrator-managed. It is injected into MiniMax
-  runs and is subject to that MiniMax subscription's quota.
+- MiniMax runs only in projects. Its named Token Plan subscription keys are
+  installation-wide and administrator-managed; the account selected in a chat
+  determines which key is injected into that run and whose quota it uses.
 
 Non-admins can use connected providers but cannot connect or refresh them.
 
@@ -218,7 +235,7 @@ Use the sign-out control in the account footer. This clears the platform session
 | Change own appearance | Yes | Yes |
 | View own account and server information | Yes | Yes |
 | Connect or refresh agent providers | Yes | No |
-| Add, replace, or remove the MiniMax Token Plan subscription key | Yes | No |
+| Add, replace, or remove MiniMax Token Plan subscription keys | Yes | No |
 | Sign in to Antigravity inside an assigned project | Yes | Yes |
 | Configure Google OAuth | Yes | No |
 | Add, remove, promote, or demote users | Yes | No |

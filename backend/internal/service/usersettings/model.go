@@ -57,6 +57,7 @@ type ChatMode string
 const (
 	ChatModeDefault ChatMode = "default"
 	ChatModePlan    ChatMode = "plan"
+	ChatModeBypass  ChatMode = "bypass"
 )
 
 type ReasoningEffort string
@@ -86,6 +87,7 @@ const (
 
 type Chat struct {
 	Provider        ChatProvider    `json:"provider"`
+	AccountID       string          `json:"accountId"`
 	Model           string          `json:"model"`
 	Mode            ChatMode        `json:"mode"`
 	ReasoningEffort ReasoningEffort `json:"reasoningEffort"`
@@ -106,6 +108,7 @@ type AppearanceUpdate struct {
 
 type ChatUpdate struct {
 	Provider        *ChatProvider    `json:"provider,omitempty"`
+	AccountID       *string          `json:"accountId,omitempty"`
 	Model           *string          `json:"model,omitempty"`
 	Mode            *ChatMode        `json:"mode,omitempty"`
 	ReasoningEffort *ReasoningEffort `json:"reasoningEffort,omitempty"`
@@ -150,7 +153,7 @@ func ValidChatProvider(provider ChatProvider) bool {
 
 func ValidChatMode(mode ChatMode) bool {
 	switch mode {
-	case ChatModeDefault, ChatModePlan:
+	case ChatModeDefault, ChatModePlan, ChatModeBypass:
 		return true
 	default:
 		return false

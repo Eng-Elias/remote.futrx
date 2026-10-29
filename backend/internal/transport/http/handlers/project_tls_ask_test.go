@@ -24,9 +24,9 @@ func TestProjectHandlerTLSAskUsesConfiguredPublicHostname(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "configured code host",
+			name:       "removed code host",
 			domain:     project.Slug + ".code.remote.example.test",
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusNotFound,
 		},
 		{
 			name:       "previous hard-coded host",
@@ -88,5 +88,5 @@ func newTLSAskProjectHandler(t *testing.T, publicHostname string) (*ProjectHandl
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewProjectHandler(projects, nil, nil, publicHostname), project
+	return NewProjectHandler(projects, nil, nil, publicHostname, nil), project
 }

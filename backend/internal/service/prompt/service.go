@@ -88,6 +88,15 @@ type UsageRecorder interface {
 	RecordRun(ctx context.Context, event serviceusage.RunEvent)
 }
 
+// QuotaRecorder files the subscription windows the agent CLIs volunteer. A
+// plan belongs to the provider account that ran, so each window arrives with
+// the saved account ID its adapter stamped, or an empty ID for the provider's
+// host login. It is optional: without one the readings are dropped and the
+// dashboard has no plan card, which is the behaviour before this existed.
+type QuotaRecorder interface {
+	Record(ctx context.Context, provider agent.ProviderID, accountID string, quota agent.Quota)
+}
+
 type Option func(*Service)
 
 // StartGate blocks new agent runs while an external host job owns the
@@ -115,6 +124,13 @@ func WithUsageRecorder(recorder UsageRecorder) Option {
 	}
 }
 
+// WithQuotaRecorder installs the recipient of provider quota observations.
+func WithQuotaRecorder(recorder QuotaRecorder) Option {
+	return func(service *Service) {
+		service.quota = recorder
+	}
+}
+
 type AgentPolicy interface {
 	Descriptor(provider string) (agentmodule.Descriptor, bool)
 	SupportsScope(provider string, scope agentmodule.ExecutionScope) bool
@@ -139,6 +155,7 @@ type Service struct {
 	agentPolicy   AgentPolicy
 	scheduleTools ScheduleToolIssuer
 	usage         UsageRecorder
+	quota         QuotaRecorder
 	startGate     StartGate
 	interactions  interactionResponseRouter
 }
@@ -262,6 +279,13 @@ func (rnr *Service) runPromptAs(
 	emitTransient func(ChatEvent),
 ) error {
 	emit = withTurnID(ledgerRunID, emit)
+	emitUnattributed := emit
+	emit = func(event ChatEvent) {
+		// The actor comes from the authenticated transport or stored schedule
+		// owner, never from provider output or the client's prompt payload.
+		event.UserEmail = input.Actor.Email
+		emitUnattributed(event)
+	}
 	id := input.ChatID
 	prompt := input.Prompt
 	meta, err := rnr.store.Get(ctx, id)
@@ -398,14 +422,18 @@ func (rnr *Service) runPromptAs(
 		chatID:    id,
 		projectID: string(meta.ProjectID),
 		userEmail: input.Actor.Email,
-		provider:  providerID,
 		model:     meta.Model,
 		scheduled: input.ScheduledTaskID != "",
 	}
 
 	run := func(runPrompt, runResumeID string) error {
-		return provider.Run(ctx, agent.RunRequest{
+		relay := runEventRelay{
+			service: rnr, ctx: ctx, chatID: id, providerID: providerID,
+			ledger: ledger, emit: emit,
+		}
+		runErr := provider.Run(ctx, agent.RunRequest{
 			Provider:       providerID,
+			AccountID:      meta.AccountID,
 			ConversationID: string(id),
 			Prompt:         runPrompt,
 			Cwd:            cwd,
@@ -424,12 +452,9 @@ func (rnr *Service) runPromptAs(
 			EnableScheduleTools:  enableScheduleTools,
 			RuntimeEnv:           runtimeEnv,
 			InteractionResponses: interactionResponses,
-		}, func(ev agent.Event) {
-			// qa added the provider argument; the ledger hook is this
-			// branch's and sits after the emit as before.
-			rnr.emitAgentEvent(ctx, id, providerID, ev, emit)
-			rnr.recordRunUsage(ctx, ledger, ev)
-		})
+		}, relay.forward)
+		relay.finish()
+		return runErr
 	}
 
 	err = run(effectivePrompt, resumeID)

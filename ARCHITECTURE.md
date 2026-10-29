@@ -5,7 +5,7 @@ This document describes how remote.futrx is put together: its runtime topology, 
 ## What it is
 
 remote.futrx is a **single-server, self-hosted** workspace for Claude Code,
-Codex, MiniMax through the Codex harness, Kimi Code, and Antigravity. A user creates a project,
+Codex, MiniMax through the Codex harness, Kimi Code, Antigravity, and Devin. A user creates a project,
 the platform gives that project an isolated Linux container, and the user
 drives interactive or scheduled agent turns against the project's files from
 the browser—with chat, terminal, code editor, file manager, Git history, task
@@ -91,14 +91,44 @@ integration/ & stores/  ── the outside world: lxc CLI, git CLI, tmux, host f
 
 Composition roots: [`backend/cmd/remote/main.go`](backend/cmd/remote/main.go) (server), [`backend/internal/service/services.go`](backend/internal/service/services.go) (services), [`backend/internal/config/containers.go`](backend/internal/config/containers.go) (the container-capability stack).
 
+### Sending email from a service
+
+`Services.Mailer` ([`service/email/mailer.go`](backend/internal/service/email/mailer.go)) is the one entry point for outbound email. A calling service composes a message with a fluent builder and never touches the stored SMTP configuration, MIME multipart, `net/smtp`, or HTML email markup:
+
+```go
+err := deps.Services.Mailer.Mail().
+    ToUser(ownerEmail).                       // or .To("someone@example.com")
+    Subject("Your run finished").
+    Heading("Run finished").
+    Text("The agent finished the run you started.").
+    KeyValues([2]string{"Project", name}, [2]string{"Duration", d.String()}).
+    Button("Open the run", runURL).           // http/https only; anything else fails the mail
+    Note("You are receiving this because you started the run.").
+    SendAsync(ctx)                            // or Send(ctx) when the outcome matters
+```
+
+- **Blocks, one shell.** `Heading`, `Text`, `Button`, `List`, `KeyValues`, `Code`, `Divider`, `Note` stack inside the single branded card. Each block renders both the HTML and its plain-text equivalent, so every message ships a matching `text/plain` alternative that nobody has to hand-write.
+- **Errors are deferred** to `Build`, so the chain stays unbroken and the caller writes one error check. `SendAsync` still runs that validation and recipient resolution synchronously and returns the error immediately — only the actual SMTP round trip happens in the background, never a composition mistake.
+- **One message per recipient**, deduplicated — no recipient learns who else was mailed. Each recipient is its own SMTP session (there is no pooling), so a very large recipient list is not the intended use.
+- **`SendAsync` never blocks a request**: the background goroutine closes over the already-built messages, never the builder, and delivers on its own 30s budget with a bounded number of concurrent SMTP sessions (`maxConcurrentSends`), outliving the request context. Delivery is best-effort and in-memory — a send in flight when the process exits is lost.
+- **An unconfigured server is a logged no-op**, not an error — the same way push degrades without a VAPID key, and the log line masks the address (`j***@example.com`). A feature must not fail because an administrator has not configured SMTP. Mail that must actually arrive — a 2FA code, an invitation — calls `.Required()` before `Send`/`SendAsync`, which turns that same case into `ErrNotConfigured` instead of a silent drop. The admin-facing test send in `email.Service` uses `Required()` for the same reason: an administrator asked directly and must be told.
+
+`email.Service` still owns the configuration itself (normalise → verify against the live SMTP server → persist to `DATA_DIR/smtp.json`) and is handed only to the admin settings handler.
+
 ## Identity, sessions, and access
 
 Three **separate** concerns, deliberately not conflated ([deep dive](docs/02-workspaces/02-auth-users-and-access.md)):
 
 1. **Platform identity.** Exactly one local-admin account (email + password, argon2id, min 12 chars, in `local-admin.json`); every other user signs in through **Google OAuth only** and must be invited first. There is no self-signup. The first claim is gated on a one-time token generated at startup and printed only to the server terminal (`setup-token.json` holds its SHA-256, never the token), so an unclaimed server cannot be taken over by whoever loads the page first; once an administrator exists, that administrator authorises any further claim instead.
 2. **Agent-provider credentials.** Host-wide OAuth tokens for
-   Claude/Codex/Kimi, connected once by an admin and **shared by all projects
-   and users** on the box. MiniMax instead reads `MINIMAX_API_KEY` from each
+   Claude/Codex/Kimi, managed by an admin and **shared by all projects and
+   users** on the box. Claude and Codex can each retain multiple named
+   subscription credentials but expose one validated active host identity at
+   a time. The saved-account vault (`agent-accounts.json`) and its activation
+   rules belong to [`service/agent/auth`](backend/internal/service/agent/auth);
+   provider adapters supply only credential placement, validation, identity,
+   and isolated login. Devin uses a host-managed manual token flow. 
+   MiniMax instead reads `MINIMAX_API_KEY` from each
    project's secret store, while Antigravity authenticates through `agy`
    inside one project and stores that state in its project-specific durable
    provider mount.
@@ -192,7 +222,7 @@ retains native CLI argument and transport ownership.
 
 The explicit composition root in
 [`config/agents.go`](backend/internal/config/agents.go) only lists provider
-`NewFactory` functions in deterministic order. There is no plugin discovery or
+`NewFactory` functions in deterministic order. There is no backend discovery or
 package `init` registration. `service.New` passes application-facing
 `module.BuildDependencies`—the narrow
 [`ProjectResolver`](backend/internal/agent/project.go), full container ports,
@@ -230,12 +260,14 @@ A chat with **no project** ("loose chat") runs the CLI directly on the host inst
 | Project secrets | `DATA_DIR/projectsecrets/<id>.json` | JSON | **plaintext**, mode 0600, not encrypted at rest |
 | Public preview links | `DATA_DIR/projectshares/<id>.json` | JSON | SHA-256 token digests only, mode 0600 |
 | Chat events | `DATA_DIR/chats/<id>/events.jsonl` | JSONL | append-only, monotonic `seq`, no rotation |
+| Agent quota snapshots | `DATA_DIR/agent-quota.json` | JSON | latest provider-reported plan windows per provider account, mode 0600 |
 | Chat event index | `DATA_DIR/transcript-index.sqlite` | SQLite | disposable event-offset and transcript-turn index rebuilt from chat JSONL |
 | Scheduled tasks | `DATA_DIR/scheduled-tasks/tasks.json` | JSON | definitions, deadlines, durable claims, pending state, and last outcomes |
 | Push subscriptions | `DATA_DIR/push-subscriptions/sha256-<hash>.json` | JSON | one file per user, filename hashes the email |
 | Web Push signing key | `DATA_DIR/webpush-vapid.json` | JSON | VAPID P-256 pair, mode 0600; rotating it invalidates every browser subscription |
 | Session key | `DATA_DIR/session.key` | 32 random bytes | mode 0600 |
 | Google OAuth secret | `DATA_DIR/oauth.json` | JSON | plaintext, mode 0600 |
+| SMTP credentials | `DATA_DIR/smtp.json` | JSON | Gmail address + app password, plaintext, mode 0600 |
 | Provider tokens | `/root/.claude*`, `/root/.codex`, `/root/.kimi-code` | provider files | copied into every container |
 | MiniMax project state | `/var/lib/remote/projects/<slug>/agent-home/minimax` | Codex-harness files | bind-mounted to `/root/.minimax`; its API key remains in the project secret store |
 | Antigravity project auth/session | `/var/lib/remote/projects/<slug>/agent-home/antigravity` | provider files | bind-mounted to `/root/.gemini/antigravity-cli`; survives container replacement |
@@ -248,9 +280,9 @@ JSON and metadata writes use temp-file + rename. Chat events are different: they
 
 Containers are **cattle**; durable state lives on the host and is bind-mounted in ([deep dive](docs/02-workspaces/03-projects-and-containers.md), [`lifecycle/service.go`](backend/internal/service/container/lifecycle/service.go)):
 
-- **Six bind mounts per project:** `workspace` → `/workspace`, plus the
+- **Seven bind mounts per project:** `workspace` → `/workspace`, plus the
   provider-declared persistent directories for Claude, Codex, MiniMax, Kimi,
-  and Antigravity. Antigravity mounts only `/root/.gemini/antigravity-cli`, not the
+  Antigravity, and Devin. Antigravity mounts only `/root/.gemini/antigravity-cli`, not the
   whole `.gemini` tree. Host dirs are chowned to uid/gid `1000000` (the
   unprivileged-root idmap) via `os.OpenRoot`+`Lchown` to defeat symlink-swap
   races.
@@ -289,7 +321,82 @@ Three capabilities live inside each container ([deep dive](docs/03-platform/06-p
 
 A **Preact** (not React) SPA built with Vite + Tailwind, whose production build is embedded into the Go binary via `go:embed` and served same-origin ([deep dive](docs/03-platform/07-data-and-frontend-state.md)). It is an installable **PWA**: `frontend/public/` supplies the manifest, icons, and a service worker for Web Push plus network-first navigation. The worker deliberately does not cache the app shell or API data; it caches only the self-contained `/offline.html` fallback and serves it when navigation cannot reach the network. Cache cleanup is restricted to Remote-owned offline-cache names. (The `code.<host>` **IDE launcher** in [`infra/launcher/`](infra/launcher/) is a separate PWA on a separate origin, with its own manifest and worker.)
 
-**Notifications.** The backend raises a Web Push notification when an agent calls `AskUserQuestion`, when a turn completes or fails, and when a scheduled run finishes. The trigger hangs off the chat repository's append path ([`push_notifier.go`](backend/internal/service/push_notifier.go)), so every producer — interactive prompts, scheduled runs, crash recovery — is covered by construction. The audience mirrors chat visibility: project members plus admins, or every registered user for a loose chat. VAPID signing and RFC 8291 payload encryption are implemented against the standard library only ([`integration/webpush`](backend/internal/integration/webpush/)), so push services relay ciphertext they cannot read and the dependency list is unchanged. It is strictly layered (`config → models → transport → api → state → app → ui`), uses no external state store and no URL router, and talks to the backend over REST (`fetch`, cookie session) plus WebSockets for live data. All auth is the same-origin cookie — **no token ever touches JavaScript**, and there are no CSRF tokens (protection rests on `SameSite=Lax` and the same-origin edge). The markdown renderer emits vnodes only, with an href allowlist and no `innerHTML` anywhere, keeping the XSS surface narrow.
+**Notifications.** The backend raises a Web Push notification when an agent calls `AskUserQuestion`, when a turn completes or fails, and when a scheduled run finishes. The trigger hangs off the chat repository's append path ([`push_notifier.go`](backend/internal/service/push_notifier.go)), so every producer — interactive prompts, scheduled runs, crash recovery — is covered by construction. The audience mirrors chat visibility: project members plus admins, or every registered user for a loose chat. VAPID signing and RFC 8291 payload encryption are implemented against the standard library only ([`integration/webpush`](backend/internal/integration/webpush/)), so push services relay ciphertext they cannot read and the dependency list is unchanged. It is strictly layered (`config → models → transport → api → state → app → ui`), uses no external state store and no URL router, and talks to the backend over REST (`fetch`, cookie session) plus WebSockets for live data. All auth is the same-origin cookie — **no token ever touches JavaScript**, and there are no CSRF tokens (protection rests on `SameSite=Lax` and the same-origin edge). The markdown renderer emits vnodes only, with an href allowlist and no `innerHTML`, keeping the XSS surface narrow — the one place the SPA does assign markup is the catalog extension host below, which renders assets compiled into the binary rather than anything a request supplied.
+
+**Catalog UI extensions.** An installable application may ship a `ui/`
+directory ([`applications/README.md`](applications/README.md)), and
+the SPA loads it for the apps a user has **installed** — globally, or in a
+project they belong to, and only while the instance is running
+(`GET /api/applications/ui`; being in the catalog grants nothing). The install
+scope travels with each entry and becomes the render scope: a globally
+installed extension draws everywhere, a project-installed one only while the
+user is actually working inside that project — leaving it puts the extension
+away entirely — which the registry enforces per contribution rather than
+trusting the extension. Stylesheets
+are injected, `scripts/main.js` is dynamically imported, and it registers
+contributions into a closed set of named slots ([`frontend/src/app/extensions/`](frontend/src/app/extensions/)):
+the chat header rail, the composer deck, project rows, the sidebar header and
+its search field, and the applications surfaces. This is what lets a backend add
+interface — an icon that opens a workspace in another editor, a panel, a popup —
+alongside whatever its `install.sh` provisions in a container. Each slot carries
+its own icon sizing, so a contributed button matches its neighbours without the
+extension knowing the app's chrome densities.
+Contributions render into plain DOM nodes rather than the component tree, so
+extension code stays framework-free, and a throwing entry module, predicate, or
+handler is caught per contribution.
+
+An application also declares a `type`: a `service` application runs software on a port and
+gets a container (a dedicated LXD one at global scope), while `ui` and
+`backend` applications install nothing in any container — their whole payload is the
+extension or the backend, so installing one allocates no container, port, or
+proxy device. That keeps "add a button to the UI" from provisioning a Linux
+container to do it, and both install on a host with no container runtime at
+all.
+
+**Catalog application backends.** The other half of "everything is a backend": an
+application may also ship a `backend/` directory of Go source
+([`docs/dev/installable-applications/15-application-backends.md`](docs/dev/installable-applications/15-application-backends.md)).
+The server compiles it and runs it as a child process over
+**hashicorp/go-plugin**, one process per installed instance, and forwards HTTP
+calls to it at `/api/applications/<instance>/backend/<path>` — which the
+application's own `ui/` reaches through `remote.backend.call(...)`. So an application can
+add a *server-side* feature rather than only a button that calls an endpoint
+someone else had to write. The contract a backend implements is
+[`pkg/applications`](backend/pkg/applications/), a dependency-free package of wire
+types; the transport that carries it is `pkg/applications/rpc`, deliberately
+go-plugin's net/rpc mode rather than gRPC, since backends are Go programs
+compiled from a catalog embedded in this same binary and a language-neutral
+protocol would buy nothing but protobuf codegen.
+
+The catalog ships **source, not binaries**, because it is embedded in a server
+that runs on whatever architecture it runs on, and because source is reviewable
+as a diff. [`internal/integration/applications`](backend/internal/integration/applications/)
+materializes an application's `backend/` beside a copy of the SDK into a generated
+module whose dependency versions are read from the running binary's own build
+info — so `go build` resolves entirely from the module cache the server's build
+already populated, and the normal path needs no network. Binaries are cached by
+a fingerprint of source, SDK, module files, and Go version, so a cold build
+happens once per edit and every later start is a stat and a handshake. Backends
+restart lazily: a crash, a stop, or a server restart is repaired by the next
+call, which is why the per-instance `DataDir` the host assigns is the only
+storage that survives.
+
+The trust boundary here is **the build, not the request** — for both halves,
+and it has to carry more weight for the backend one. `ui/` assets are embedded
+by `//go:embed` next to the SPA and served from
+`/api/applications/catalog/<application>/ui/<path>` to signed-in users only, so
+extension code carries exactly the privileges of first-party frontend code and
+is reviewed as such. `backend/` source is embedded the same way and then *runs
+as a child of the server process*, with the server's privileges and the
+install's secrets, so it is reviewed as backend code. There is no sandbox for
+either and none is implied; the server-side guarantees are narrower and
+specific — the registry resolves asset paths inside one application's `ui/` and
+nowhere else, responses are typed from the file extension with `nosniff`, and
+on the backend path the caller identity is stamped from the session while the
+caller's own `Cookie` and `Authorization` headers are withheld, so a backend can
+authorize a user without being able to act as them. Process isolation buys
+robustness rather than containment: a panicking or hanging backend costs one
+call, not the server.
 
 **Agent authentication UI.** The frontend loads ordered module metadata and a
 normalized auth snapshot from `GET /api/agent-auth`, then subscribes to
@@ -355,6 +462,7 @@ These are the boundaries the [threat model](docs/threat-model.md) reasons about:
 - [`docs/01-overview/`](docs/01-overview/) — system overview and the code map
 - [`docs/02-workspaces/`](docs/02-workspaces/) — auth, projects/containers, chat/agents, workspace tools
 - [`docs/dev/agents/`](docs/dev/agents/) — agent module contracts and the complete extension guide
+- [`docs/dev/installable-applications/`](docs/dev/installable-applications/) — the installable-application format, extension slots, and application backends
 - [`docs/03-platform/`](docs/03-platform/) — previews & browser, data & frontend state, API & realtime
 - [`docs/04-operations/`](docs/04-operations/) — deployment and operations
 - [Threat model](docs/threat-model.md) · [Known limitations](docs/known-limitations.md)

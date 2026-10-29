@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 type Service struct {
 	repo               Repository
+	chats              ChatCleanup
 	containerLifecycle ContainerLifecycle
 	containerInspector ContainerInspector
 	containerNetwork   ContainerNetwork
@@ -32,7 +34,15 @@ type Service struct {
 	// image) is relaunched exactly once even under concurrent prompts. It also
 	// keeps an explicit stop, restart, or delete from racing an agent-triggered
 	// recovery. Different projects remain independent.
-	runState keyedMutex
+	runState          keyedMutex
+	containerRestorer func(context.Context, string) error
+}
+
+// SetContainerRestorer attaches optional application recovery after a missing
+// project container has been recreated. The caller wires this after both
+// services exist, avoiding a construction cycle.
+func (s *Service) SetContainerRestorer(restore func(context.Context, string) error) {
+	s.containerRestorer = restore
 }
 
 func New(
@@ -40,8 +50,9 @@ func New(
 	containers ContainerDependencies,
 	secrets SecretsRepository,
 	access AccessRepository,
+	options ...Option,
 ) *Service {
-	return &Service{
+	service := &Service{
 		repo:               repo,
 		containerLifecycle: containers.Lifecycle,
 		containerInspector: containers.Inspector,
@@ -50,6 +61,20 @@ func New(
 		access:             newAccessList(access),
 		secrets:            newSecretStore(secrets, containers.Environment),
 		browsers:           newAgentBrowsers(containers.Browser, repo),
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
+type Option func(*Service)
+
+// WithChatCleanup makes project deletion remove every associated chat before
+// destroying the container or project record.
+func WithChatCleanup(chats ChatCleanup) Option {
+	return func(service *Service) {
+		service.chats = chats
 	}
 }
 
@@ -136,6 +161,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput, callerEmail string
 	if name == "" {
 		return Meta{}, ErrNameRequired
 	}
+	if strings.Contains(name, "--") {
+		return Meta{}, ErrReservedNameSeparator
+	}
+	// Refuse before anything is recorded, so a full disk surfaces as a clear
+	// error on the create request rather than a project stuck in an error
+	// state carrying the transcript of a failed image unpack.
+	if s.containerLifecycle != nil {
+		if err := s.containerLifecycle.CheckCapacity(ctx); err != nil {
+			return Meta{}, err
+		}
+	}
 
 	m, err := s.repo.Create(ctx, Meta{
 		Name:   name,
@@ -166,6 +202,9 @@ func (s *Service) Create(ctx context.Context, in CreateInput, callerEmail string
 func (s *Service) Update(ctx context.Context, id ID, in UpdateInput) (Meta, error) {
 	if !ValidID(id) {
 		return Meta{}, ErrInvalidID
+	}
+	if in.Name != nil && strings.Contains(*in.Name, "--") {
+		return Meta{}, ErrReservedNameSeparator
 	}
 	return s.repo.Update(ctx, id, func(m *Meta) {
 		if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
@@ -289,6 +328,11 @@ func (s *Service) Delete(ctx context.Context, id ID) error {
 	if err != nil {
 		return err
 	}
+	if s.chats != nil {
+		if err := s.chats.DeleteProjectChats(ctx, id); err != nil {
+			return fmt.Errorf("delete project chats: %w", err)
+		}
+	}
 	s.browsers.clearState(id)
 	if s.containerLifecycle != nil && m.ContainerName != "" {
 		if err := s.containerLifecycle.Delete(ctx, m.ContainerName); err != nil {
@@ -332,6 +376,11 @@ func (s *Service) startLocked(ctx context.Context, id ID) (Meta, error) {
 		if state == ContainerStateMissing {
 			if syncErr := s.secrets.syncContainer(ctx, id, m.ContainerName); syncErr != nil {
 				log.Printf("projects: sync env to %s after ensure: %v", m.ContainerName, syncErr)
+			}
+			if s.containerRestorer != nil {
+				if restoreErr := s.containerRestorer(ctx, string(id)); restoreErr != nil {
+					log.Printf("projects: restore applications in %s: %v", m.ContainerName, restoreErr)
+				}
 			}
 		}
 	}

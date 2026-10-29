@@ -6,7 +6,7 @@ Start with the symptom below. Use **Refresh** after a recovery action so that th
 
 ### The server asks me to create an admin
 
-No local administrator has claimed the installation yet. Open the setup link printed to the server terminal at startup - the form only accepts the one-time token it carries - then create the first account with the intended owner email and a password of at least 12 characters. If the link expired or was lost, run `remote setup-token` on the host to print a new one; issuing a new token invalidates the previous one.
+No local administrator has claimed the installation yet. Open the setup link printed to the server terminal at startup - the form only accepts the one-time token it carries - then create the first account with the intended owner email and a password of at least 12 characters. If the link expired or was lost, run `sudo remote setup-token` on the host to print a new one; issuing a new token invalidates the previous one.
 
 ### A member sees “waiting for administrator”
 
@@ -40,6 +40,10 @@ There is no password-reset screen. Host access is required to repair the local-a
 5. Check the backend and LXD logs on the host.
 
 Creating a project requires metadata, durable directories, an LXD launch, mounts, limits, and best-effort provisioning.
+
+### Project creation says there is not enough disk space
+
+Before creating a project, Remote checks the LXD storage pool that new containers use. It needs room for the base image plus 2 GiB, and the message shows how much is free and how much is needed. Free up space on the host and try again. With the default `dir` pool, that space comes from the host's root filesystem, which also holds the durable project directories.
 
 ### Project is stopped, missing, or in error
 
@@ -138,11 +142,11 @@ provider triggers.
 
 MiniMax is available only in project chats and requires a Token Plan
 subscription. Open **Settings → Agents**, choose the MiniMax sign-in action,
-follow the Token Plan link if needed, and save the `sk-cp-…` subscription key.
+follow the Token Plan link if needed, and save a named `sk-cp-…` subscription key.
 Standard pay-as-you-go API keys are rejected. The locked MiniMax row then moves
 from **Sign in to use** to **Connected**, and its model list becomes available.
 If MiniMax rejects the subscription key, the form remains open and the existing
-supported key, if any, remains active.
+saved accounts, if any, remain unchanged.
 
 ### Antigravity says it is not signed in
 
